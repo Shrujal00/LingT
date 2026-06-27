@@ -1,6 +1,6 @@
 import type {Metadata} from 'next';
-import Script from 'next/script';
 import {Fraunces, Inter, Roboto_Mono} from 'next/font/google';
+import {getRuntimeFirebaseConfig} from '@/lib/firebase/runtime-config';
 import './globals.css';
 
 const inter = Inter({
@@ -26,11 +26,25 @@ export const metadata: Metadata = {
   description: 'A chat-first AI productivity companion powered by Ling and her agentic team.',
 };
 
+export const dynamic = 'force-dynamic';
+
+function serializeForScript(value: unknown) {
+  return JSON.stringify(value).replace(/</g, '\\u003c');
+}
+
 export default function RootLayout({children}: {children: React.ReactNode}) {
+  const firebaseConfig = getRuntimeFirebaseConfig();
+
   return (
     <html lang="en" className={`${inter.variable} ${fraunces.variable} ${robotoMono.variable} h-full antialiased`}>
+      <head>
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `window.__LINGT_FIREBASE_CONFIG__=${serializeForScript(firebaseConfig)};`,
+          }}
+        />
+      </head>
       <body className="h-full bg-background text-foreground font-sans selection:bg-brand-soft selection:text-brand-deep" suppressHydrationWarning>
-        <Script src="/api/runtime-config" strategy="beforeInteractive" />
         {children}
       </body>
     </html>

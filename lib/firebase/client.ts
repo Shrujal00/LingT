@@ -26,12 +26,12 @@ export const hasFirebaseConfig = Boolean(
 );
 
 const firebaseConfig: RuntimeFirebaseConfig = {
-  apiKey: runtimeConfig?.apiKey || process.env.NEXT_PUBLIC_FIREBASE_API_KEY || 'build-safe-api-key',
-  authDomain: runtimeConfig?.authDomain || process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN || 'build-safe.firebaseapp.com',
-  projectId: runtimeConfig?.projectId || process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID || 'build-safe',
-  storageBucket: runtimeConfig?.storageBucket || process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET || 'build-safe.appspot.com',
-  messagingSenderId: runtimeConfig?.messagingSenderId || process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID || '000000000000',
-  appId: runtimeConfig?.appId || process.env.NEXT_PUBLIC_FIREBASE_APP_ID || '1:000000000000:web:buildsafe',
+  apiKey: runtimeConfig?.apiKey || process.env.NEXT_PUBLIC_FIREBASE_API_KEY || '',
+  authDomain: runtimeConfig?.authDomain || process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN || '',
+  projectId: runtimeConfig?.projectId || process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID || '',
+  storageBucket: runtimeConfig?.storageBucket || process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET || '',
+  messagingSenderId: runtimeConfig?.messagingSenderId || process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID || '',
+  appId: runtimeConfig?.appId || process.env.NEXT_PUBLIC_FIREBASE_APP_ID || '',
   measurementId: runtimeConfig?.measurementId || process.env.NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID,
 };
 
