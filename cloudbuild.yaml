@@ -1,7 +1,10 @@
 substitutions:
-  _REGION: asia-south1
-  _SERVICE: lingt
-  _ARTIFACT_REPO: lingt
+  _AR_HOSTNAME: asia-south1-docker.pkg.dev
+  _AR_PROJECT_ID: lingt-3e31c
+  _AR_REPOSITORY: cloud-run-source-deploy
+  _DEPLOY_REGION: asia-south1
+  _PLATFORM: managed
+  _SERVICE_NAME: lingt
   _NEXT_PUBLIC_FIREBASE_API_KEY: ''
   _NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN: ''
   _NEXT_PUBLIC_FIREBASE_PROJECT_ID: ''
@@ -16,7 +19,7 @@ steps:
     args:
       - build
       - -t
-      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_ARTIFACT_REPO}/${_SERVICE}:$SHORT_SHA
+      - ${_AR_HOSTNAME}/${_AR_PROJECT_ID}/${_AR_REPOSITORY}/${_SERVICE_NAME}:$COMMIT_SHA
       - --build-arg
       - NEXT_PUBLIC_FIREBASE_API_KEY=${_NEXT_PUBLIC_FIREBASE_API_KEY}
       - --build-arg
@@ -34,6 +37,24 @@ steps:
       - --build-arg
       - NEXT_PUBLIC_FIREBASE_VAPID_KEY=${_NEXT_PUBLIC_FIREBASE_VAPID_KEY}
       - .
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - push
+      - ${_AR_HOSTNAME}/${_AR_PROJECT_ID}/${_AR_REPOSITORY}/${_SERVICE_NAME}:$COMMIT_SHA
+  - name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    entrypoint: gcloud
+    args:
+      - run
+      - services
+      - update
+      - ${_SERVICE_NAME}
+      - --image
+      - ${_AR_HOSTNAME}/${_AR_PROJECT_ID}/${_AR_REPOSITORY}/${_SERVICE_NAME}:$COMMIT_SHA
+      - --region
+      - ${_DEPLOY_REGION}
+      - --platform
+      - ${_PLATFORM}
+      - --quiet
 
 images:
-  - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_ARTIFACT_REPO}/${_SERVICE}:$SHORT_SHA
+  - ${_AR_HOSTNAME}/${_AR_PROJECT_ID}/${_AR_REPOSITORY}/${_SERVICE_NAME}:$COMMIT_SHA

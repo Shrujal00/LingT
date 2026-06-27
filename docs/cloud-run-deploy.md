@@ -8,33 +8,44 @@ LingT should be deployed on Google Cloud Run for Vibe2Ship.
 gcloud auth login
 gcloud config set project YOUR_PROJECT_ID
 gcloud services enable run.googleapis.com cloudbuild.googleapis.com artifactregistry.googleapis.com
-gcloud artifacts repositories create lingt --repository-format=docker --location=asia-south1
 ```
 
-## 2. Build image with public Firebase config
+## 2. Cloud Build trigger substitutions
 
-These values are safe to pass as build args because `NEXT_PUBLIC_*` variables are included in the browser bundle.
+Use the Cloud Run GitHub trigger with `cloudbuild.yaml`. Keep the generated Cloud Run substitutions, then add these Firebase public build substitutions. These values are safe to pass as build args because `NEXT_PUBLIC_*` variables are included in the browser bundle.
 
-```powershell
-gcloud builds submit `
-  --config cloudbuild.yaml `
-  --substitutions _REGION=asia-south1,_SERVICE=lingt,_ARTIFACT_REPO=lingt,_NEXT_PUBLIC_FIREBASE_API_KEY="...",_NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN="...",_NEXT_PUBLIC_FIREBASE_PROJECT_ID="...",_NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET="...",_NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID="...",_NEXT_PUBLIC_FIREBASE_APP_ID="...",_NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID="...",_NEXT_PUBLIC_FIREBASE_VAPID_KEY="..."
+```txt
+_NEXT_PUBLIC_FIREBASE_API_KEY=...
+_NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN=...
+_NEXT_PUBLIC_FIREBASE_PROJECT_ID=...
+_NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET=...
+_NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID=...
+_NEXT_PUBLIC_FIREBASE_APP_ID=...
+_NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID=...
+_NEXT_PUBLIC_FIREBASE_VAPID_KEY=...
 ```
 
-## 3. Deploy image to Cloud Run
+## 3. Runtime environment variables
 
-Use the image tag printed by Cloud Build.
+Set these in Cloud Run under Variables & Secrets. These are read by the running server, not baked into the browser bundle.
 
-```powershell
-gcloud run deploy lingt `
-  --image asia-south1-docker.pkg.dev/YOUR_PROJECT_ID/lingt/lingt:SHORT_SHA `
-  --region asia-south1 `
-  --allow-unauthenticated `
-  --port 8080 `
-  --set-env-vars APP_URL="https://YOUR_CLOUD_RUN_URL",GOOGLE_REDIRECT_URI="https://YOUR_CLOUD_RUN_URL/api/integrations/google/callback",GMAIL_WEBHOOK_SECRET="..." `
-  --set-env-vars GEMINI_API_KEY="...",GOOGLE_CLIENT_ID="...",GOOGLE_CLIENT_SECRET="..." `
-  --set-env-vars FIREBASE_ADMIN_PROJECT_ID="...",FIREBASE_ADMIN_CLIENT_EMAIL="..." `
-  --set-env-vars FIREBASE_ADMIN_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----\n"
+```txt
+APP_URL=https://YOUR_CLOUD_RUN_URL
+NEXT_PUBLIC_APP_URL=https://YOUR_CLOUD_RUN_URL
+GOOGLE_REDIRECT_URI=https://YOUR_CLOUD_RUN_URL/api/integrations/google/callback
+GOOGLE_API_KEY=...
+GEMINI_API_KEY=...
+GEMINI_MODEL=gemini-3.5-flash
+GOOGLE_PLATFORM_TYPE=gcp
+GOOGLE_CLIENT_ID=...
+GOOGLE_CLIENT_SECRET=...
+GOOGLE_OAUTH_STATE_SECRET=...
+FIREBASE_ADMIN_PROJECT_ID=...
+FIREBASE_ADMIN_CLIENT_EMAIL=...
+FIREBASE_ADMIN_PRIVATE_KEY=...
+GMAIL_WEBHOOK_SECRET=...
+REMINDER_CRON_SECRET=...
+LINGT_AUTOCOMMIT_CALENDAR=false
 ```
 
 ## 4. Update Google OAuth
