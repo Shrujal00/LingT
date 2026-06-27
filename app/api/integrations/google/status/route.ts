@@ -34,6 +34,8 @@ export async function GET(request: Request) {
         connected: Boolean(integration?.refreshToken || integration?.accessToken),
         scope: integration?.scope || '',
         connectedAt: integration?.connectedAt || null,
+        lastGmailScanAt: (integration as StoredGoogleIntegration & {lastGmailScanAt?: string})?.lastGmailScanAt || null,
+        lastGmailScan: (integration as StoredGoogleIntegration & {lastGmailScan?: unknown})?.lastGmailScan || null,
         oauthConfigured: hasGoogleOAuthConfig(),
         serverStorageConfigured: true,
         error: null,

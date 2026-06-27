@@ -44,6 +44,7 @@ FIREBASE_ADMIN_PROJECT_ID=...
 FIREBASE_ADMIN_CLIENT_EMAIL=...
 FIREBASE_ADMIN_PRIVATE_KEY=...
 GMAIL_WEBHOOK_SECRET=...
+LINGT_AUTOMATION_SECRET=...
 REMINDER_CRON_SECRET=...
 LINGT_AUTOCOMMIT_CALENDAR=false
 ```
@@ -56,15 +57,21 @@ Add this redirect URI to the Google Cloud OAuth web client:
 https://YOUR_CLOUD_RUN_URL/api/integrations/google/callback
 ```
 
-## 5. Update Apps Script
+## 5. Optional background Gmail scan
 
-Set the Gmail trigger webhook URL to:
+LingT scans Gmail directly through the connected Google OAuth account. To run it in the background on Google Cloud, create a Cloud Scheduler job:
 
-```txt
-https://YOUR_CLOUD_RUN_URL/api/gmail/webhook
+```powershell
+gcloud scheduler jobs create http lingt-gmail-sync `
+  --location=asia-south1 `
+  --schedule="*/10 * * * *" `
+  --uri="https://YOUR_CLOUD_RUN_URL/api/gmail/sync" `
+  --http-method=POST `
+  --headers="Content-Type=application/json,x-lingt-automation-secret=YOUR_LINGT_AUTOMATION_SECRET" `
+  --message-body="{\"all\":true,\"limit\":10}"
 ```
 
-Use the same `GMAIL_WEBHOOK_SECRET` value in the `x-lingt-webhook-secret` header.
+The app also scans once when a connected user opens Integrations.
 
 ## 6. Live smoke tests
 
@@ -75,4 +82,4 @@ Use the same `GMAIL_WEBHOOK_SECRET` value in the `x-lingt-webhook-secret` header
 - Send a chat message
 - Add generated tasks to Workspace
 - Paste meeting notes into Workspace and approve one action
-- Send a test Apps Script payload to `/api/gmail/webhook`
+- Run Gmail scan from `/integrations`

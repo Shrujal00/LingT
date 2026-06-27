@@ -23,8 +23,8 @@ export async function GET() {
         message: 'OAuth enables Calendar read/write after consent',
       },
       gmailAgent: {
-        status: process.env.GMAIL_WEBHOOK_SECRET ? 'configured' : 'missing',
-        message: 'Apps Script can call /api/gmail/webhook for incoming mail processing',
+        status: process.env.LINGT_AUTOMATION_SECRET || process.env.REMINDER_CRON_SECRET || process.env.GMAIL_WEBHOOK_SECRET ? 'configured' : 'missing',
+        message: 'Cloud Scheduler can call /api/gmail/sync for connected Gmail processing',
       },
     },
     checks: {
