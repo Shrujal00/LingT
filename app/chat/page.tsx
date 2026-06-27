@@ -125,7 +125,7 @@ export default function ChatPage() {
   );
   const bottomRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => onAuthStateChanged(firebaseAuth, setUser), []);
+  useEffect(() => onAuthStateChanged(firebaseAuth, setUser, () => setUser(null)), []);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({behavior: 'smooth'});

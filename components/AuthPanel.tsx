@@ -15,10 +15,17 @@ export default function AuthPanel() {
   const [error, setError] = useState('');
 
   useEffect(() => {
-    return onAuthStateChanged(firebaseAuth, (nextUser) => {
-      setUser(nextUser);
-      setLoading(false);
-    });
+    return onAuthStateChanged(
+      firebaseAuth,
+      (nextUser) => {
+        setUser(nextUser);
+        setLoading(false);
+      },
+      (err) => {
+        setError(err.message);
+        setLoading(false);
+      },
+    );
   }, []);
 
   async function handleSignIn() {

@@ -44,15 +44,22 @@ export default function IntegrationsPage() {
 
   useEffect(
     () =>
-      onAuthStateChanged(firebaseAuth, (nextUser) => {
-        setUser(nextUser);
-        if (!nextUser) {
-          setStatus(null);
+      onAuthStateChanged(
+        firebaseAuth,
+        (nextUser) => {
+          setUser(nextUser);
+          if (!nextUser) {
+            setStatus(null);
+            setLoading(false);
+          } else {
+            setLoading(true);
+          }
+        },
+        (err) => {
+          setError(err.message);
           setLoading(false);
-        } else {
-          setLoading(true);
-        }
-      }),
+        },
+      ),
     [],
   );
 

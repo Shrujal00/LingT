@@ -35,23 +35,29 @@ export function useWorkspaceSync() {
   useEffect(() => {
     let unsubscribeWorkspace: (() => void) | undefined;
 
-    const unsubscribeAuth = onAuthStateChanged(firebaseAuth, async (nextUser) => {
-      unsubscribeWorkspace?.();
-      setUser(nextUser);
+    const unsubscribeAuth = onAuthStateChanged(
+      firebaseAuth,
+      async (nextUser) => {
+        unsubscribeWorkspace?.();
+        setUser(nextUser);
 
-      if (!nextUser) {
-        setWorkspace({tasks: [], openLoops: [], routines: [], meetingActionItems: [], habits: []});
-        setLoading(false);
-        return;
-      }
+        if (!nextUser) {
+          setWorkspace({tasks: [], openLoops: [], routines: [], meetingActionItems: [], habits: []});
+          setLoading(false);
+          return;
+        }
 
-      setLoading(true);
-      await seedWorkspaceIfEmpty(nextUser.uid);
-      unsubscribeWorkspace = subscribeWorkspace(nextUser.uid, (partial) => {
-        setWorkspace((current) => ({...current, ...partial}));
+        setLoading(true);
+        await seedWorkspaceIfEmpty(nextUser.uid);
+        unsubscribeWorkspace = subscribeWorkspace(nextUser.uid, (partial) => {
+          setWorkspace((current) => ({...current, ...partial}));
+          setLoading(false);
+        });
+      },
+      () => {
         setLoading(false);
-      });
-    });
+      },
+    );
 
     return () => {
       unsubscribeWorkspace?.();

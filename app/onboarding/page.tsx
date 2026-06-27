@@ -157,18 +157,25 @@ export default function OnboardingPage() {
   });
 
   useEffect(() => {
-    return onAuthStateChanged(firebaseAuth, (nextUser) => {
-      setUser(nextUser);
-      setLoading(false);
-      if (nextUser) {
-        const name = splitName(nextUser);
-        setProfile((current) => ({
-          ...current,
-          firstName: current.firstName || name.firstName,
-          lastName: current.lastName || name.lastName,
-        }));
-      }
-    });
+    return onAuthStateChanged(
+      firebaseAuth,
+      (nextUser) => {
+        setUser(nextUser);
+        setLoading(false);
+        if (nextUser) {
+          const name = splitName(nextUser);
+          setProfile((current) => ({
+            ...current,
+            firstName: current.firstName || name.firstName,
+            lastName: current.lastName || name.lastName,
+          }));
+        }
+      },
+      (err) => {
+        setError(err.message);
+        setLoading(false);
+      },
+    );
   }, []);
 
   async function handleSignIn() {
