@@ -14,6 +14,9 @@ substitutions:
   _NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID: ''
   _NEXT_PUBLIC_FIREBASE_VAPID_KEY: ''
 
+options:
+  logging: CLOUD_LOGGING_ONLY
+
 steps:
   - name: gcr.io/cloud-builders/docker
     args:
