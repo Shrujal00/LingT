@@ -1,4 +1,5 @@
 import type {Metadata} from 'next';
+import Script from 'next/script';
 import {Fraunces, Inter, Roboto_Mono} from 'next/font/google';
 import './globals.css';
 
@@ -29,6 +30,7 @@ export default function RootLayout({children}: {children: React.ReactNode}) {
   return (
     <html lang="en" className={`${inter.variable} ${fraunces.variable} ${robotoMono.variable} h-full antialiased`}>
       <body className="h-full bg-background text-foreground font-sans selection:bg-brand-soft selection:text-brand-deep" suppressHydrationWarning>
+        <Script src="/api/runtime-config" strategy="beforeInteractive" />
         {children}
       </body>
     </html>

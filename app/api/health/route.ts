@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import {hasRuntimeFirebaseConfig} from '@/lib/firebase/runtime-config';
 
 export async function GET() {
   // Simulating internal checklist checks
@@ -14,7 +15,7 @@ export async function GET() {
         provider: 'Google GenAI SDK (gemini-2.5-flash / gemini-3.5-flash)',
       },
       firebase: {
-        status: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID ? 'configured' : 'missing',
+        status: hasRuntimeFirebaseConfig() ? 'configured' : 'missing',
         message: 'Firebase Auth and Firestore back the user workspace',
       },
       googleCalendar: {

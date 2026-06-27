@@ -26,7 +26,7 @@ import type {
   WorkspaceTaskInput,
 } from '@/lib/orchestration/schemas';
 import type {Habit, OpenLoop, Task} from '@/lib/lingt-data';
-import {firebaseApp} from '@/lib/firebase/client';
+import {firebaseApp, getFirebaseVapidKey} from '@/lib/firebase/client';
 import {
   saveDraftRecord,
   saveGeneratedPlan,
@@ -214,7 +214,7 @@ export default function ProductivitySuite({user, tasks, openLoops, habits}: Prod
     }
 
     let token = `permission:${user.uid}`;
-    const vapidKey = process.env.NEXT_PUBLIC_FIREBASE_VAPID_KEY;
+    const vapidKey = getFirebaseVapidKey();
 
     if (vapidKey && 'serviceWorker' in navigator) {
       try {
