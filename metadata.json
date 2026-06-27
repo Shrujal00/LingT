@@ -1,0 +1,6 @@
+{
+  "name": "LingT",
+  "description": "An agentic productivity portal featuring Ling, your main AI productivity assistant, and the T team of agentic orchestrators.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

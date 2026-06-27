@@ -1,0 +1,111 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function ownsExistingDoc() {
+      return signedIn() && resource.data.userId == request.auth.uid;
+    }
+
+    function ownsNewDoc() {
+      return signedIn() && request.resource.data.userId == request.auth.uid;
+    }
+
+    function preservesOwner() {
+      return request.resource.data.userId == resource.data.userId;
+    }
+
+    match /tasks/{docId} {
+      allow read: if ownsExistingDoc();
+      allow create: if ownsNewDoc();
+      allow update: if ownsExistingDoc() && ownsNewDoc() && preservesOwner();
+      allow delete: if ownsExistingDoc();
+    }
+
+    match /openLoops/{docId} {
+      allow read: if ownsExistingDoc();
+      allow create: if ownsNewDoc();
+      allow update: if ownsExistingDoc() && ownsNewDoc() && preservesOwner();
+      allow delete: if ownsExistingDoc();
+    }
+
+    match /routines/{docId} {
+      allow read: if ownsExistingDoc();
+      allow create: if ownsNewDoc();
+      allow update: if ownsExistingDoc() && ownsNewDoc() && preservesOwner();
+      allow delete: if ownsExistingDoc();
+    }
+
+    match /meetingActionItems/{docId} {
+      allow read: if ownsExistingDoc();
+      allow create: if ownsNewDoc();
+      allow update: if ownsExistingDoc() && ownsNewDoc() && preservesOwner();
+      allow delete: if ownsExistingDoc();
+    }
+
+    match /habits/{docId} {
+      allow read: if ownsExistingDoc();
+      allow create: if ownsNewDoc();
+      allow update: if ownsExistingDoc() && ownsNewDoc() && preservesOwner();
+      allow delete: if ownsExistingDoc();
+    }
+
+    match /plans/{docId} {
+      allow read: if ownsExistingDoc();
+      allow create: if ownsNewDoc();
+      allow update: if ownsExistingDoc() && ownsNewDoc() && preservesOwner();
+      allow delete: if ownsExistingDoc();
+    }
+
+    match /reminders/{docId} {
+      allow read: if ownsExistingDoc();
+      allow create: if ownsNewDoc();
+      allow update: if ownsExistingDoc() && ownsNewDoc() && preservesOwner();
+      allow delete: if ownsExistingDoc();
+    }
+
+    match /drafts/{docId} {
+      allow read: if ownsExistingDoc();
+      allow create: if ownsNewDoc();
+      allow update: if ownsExistingDoc() && ownsNewDoc() && preservesOwner();
+      allow delete: if ownsExistingDoc();
+    }
+
+    match /conversations/{docId} {
+      allow read: if ownsExistingDoc();
+      allow create: if ownsNewDoc();
+      allow update: if ownsExistingDoc() && ownsNewDoc() && preservesOwner();
+      allow delete: if ownsExistingDoc();
+    }
+
+    match /messages/{docId} {
+      allow read: if ownsExistingDoc();
+      allow create: if ownsNewDoc();
+      allow update: if ownsExistingDoc() && ownsNewDoc() && preservesOwner();
+      allow delete: if ownsExistingDoc();
+    }
+
+    match /users/{userId} {
+      allow read, create, update, delete: if signedIn() && userId == request.auth.uid;
+    }
+
+    match /googleIntegrations/{docId} {
+      allow read, write: if false;
+    }
+
+    match /notificationTokens/{docId} {
+      allow read, write: if false;
+    }
+
+    match /emailAutomations/{docId} {
+      allow read, write: if false;
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

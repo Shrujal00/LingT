@@ -1,0 +1,147 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@theme inline {
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  --font-display: var(--font-fraunces), Georgia, serif;
+  --font-mono: var(--font-roboto-mono), ui-monospace, monospace;
+
+  --color-background: var(--background);
+  --color-surface: var(--surface);
+  --color-surface-warm: var(--surface-warm);
+  --color-surface-muted: var(--surface-muted);
+  --color-foreground: var(--foreground);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-border: var(--border);
+  --color-brand: var(--brand);
+  --color-brand-soft: var(--brand-soft);
+  --color-brand-deep: var(--brand-deep);
+  --color-danger: var(--danger);
+  --color-warning: var(--warning);
+  --color-success: var(--success);
+  --color-info: var(--info);
+}
+
+:root {
+  --background: #fbfaf5;
+  --surface: #ffffff;
+  --surface-warm: #f2eadb;
+  --surface-muted: #f6f3ea;
+  --foreground: #161411;
+  --muted-foreground: #69645b;
+  --border: #ded6c8;
+
+  --brand: #1a73e8;
+  --brand-foreground: #ffffff;
+  --brand-soft: #e8f0fe;
+  --brand-deep: #174ea6;
+
+  --google-blue: #1a73e8;
+  --google-red: #ea4335;
+  --google-yellow: #fbbc04;
+  --google-green: #34a853;
+
+  --agent-planner: #1a73e8;
+  --agent-memory: #8430ce;
+  --agent-calendar: #34a853;
+  --agent-reminder: #ea4335;
+  --agent-meeting: #4285f4;
+  --agent-drafting: #fbbc04;
+  --agent-routine: #64748b;
+
+  --success: #138a4b;
+  --warning: #f29900;
+  --danger: #ea4335;
+  --info: #1a73e8;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  min-height: 100%;
+}
+
+body {
+  margin: 0;
+  background:
+    radial-gradient(circle at top left, rgba(232, 240, 254, 0.95), transparent 30rem),
+    radial-gradient(circle at bottom right, rgba(254, 247, 224, 0.75), transparent 28rem),
+    var(--background);
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+}
+
+/* Custom global scrollbar styles for a clean app feel */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(105, 100, 91, 0.25);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(105, 100, 91, 0.45);
+}
+
+@keyframes lingt-drift {
+  0% {
+    transform: translate3d(-2%, 1%, 0) scale(1);
+  }
+  50% {
+    transform: translate3d(3%, -2%, 0) scale(1.04);
+  }
+  100% {
+    transform: translate3d(-2%, 1%, 0) scale(1);
+  }
+}
+
+@keyframes lingt-rise {
+  from {
+    opacity: 0;
+    transform: translateY(18px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes lingt-pulse-line {
+  0%,
+  100% {
+    opacity: 0.35;
+    transform: scaleX(0.7);
+  }
+  50% {
+    opacity: 0.9;
+    transform: scaleX(1);
+  }
+}
+
+.animate-lingt-drift {
+  animation: lingt-drift 12s ease-in-out infinite;
+}
+
+.animate-lingt-rise {
+  animation: lingt-rise 520ms ease-out both;
+}
+
+.animate-lingt-pulse-line {
+  animation: lingt-pulse-line 2.6s ease-in-out infinite;
+  transform-origin: left;
+}
