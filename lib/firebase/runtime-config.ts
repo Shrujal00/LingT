@@ -21,16 +21,20 @@ function cleanEnvValue(value?: string) {
   return trimmed;
 }
 
+function runtimeEnv(name: string) {
+  return process.env[name];
+}
+
 export function getRuntimeFirebaseConfig(): RuntimeFirebaseConfig {
   return {
-    apiKey: cleanEnvValue(process.env.NEXT_PUBLIC_FIREBASE_API_KEY),
-    authDomain: cleanEnvValue(process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN),
-    projectId: cleanEnvValue(process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID),
-    storageBucket: cleanEnvValue(process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET),
-    messagingSenderId: cleanEnvValue(process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID),
-    appId: cleanEnvValue(process.env.NEXT_PUBLIC_FIREBASE_APP_ID),
-    measurementId: cleanEnvValue(process.env.NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID) || undefined,
-    vapidKey: cleanEnvValue(process.env.NEXT_PUBLIC_FIREBASE_VAPID_KEY) || undefined,
+    apiKey: cleanEnvValue(runtimeEnv('NEXT_PUBLIC_FIREBASE_API_KEY')),
+    authDomain: cleanEnvValue(runtimeEnv('NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN')),
+    projectId: cleanEnvValue(runtimeEnv('NEXT_PUBLIC_FIREBASE_PROJECT_ID')),
+    storageBucket: cleanEnvValue(runtimeEnv('NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET')),
+    messagingSenderId: cleanEnvValue(runtimeEnv('NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID')),
+    appId: cleanEnvValue(runtimeEnv('NEXT_PUBLIC_FIREBASE_APP_ID')),
+    measurementId: cleanEnvValue(runtimeEnv('NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID')) || undefined,
+    vapidKey: cleanEnvValue(runtimeEnv('NEXT_PUBLIC_FIREBASE_VAPID_KEY')) || undefined,
   };
 }
 
