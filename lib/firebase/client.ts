@@ -57,6 +57,7 @@ const buildConfig = normalizeConfig({
 });
 const browserRuntimeConfig = normalizeConfig(runtimeConfig);
 const firebaseConfig = isCompleteConfig(browserRuntimeConfig) ? browserRuntimeConfig : buildConfig;
+const isBrowser = typeof window !== 'undefined';
 
 export const hasFirebaseConfig = isCompleteConfig(firebaseConfig);
 
@@ -64,11 +65,17 @@ export function getFirebaseVapidKey() {
   return cleanEnvValue(runtimeFirebaseConfig()?.vapidKey || process.env.NEXT_PUBLIC_FIREBASE_VAPID_KEY);
 }
 
-export const firebaseApp = getApps().length ? getApp() : initializeApp(firebaseConfig);
-export const firebaseAuth = getAuth(firebaseApp);
-export const firestoreDb = getFirestore(firebaseApp);
-export const googleProvider = new GoogleAuthProvider();
+export const firebaseApp = isBrowser
+  ? getApps().length
+    ? getApp()
+    : initializeApp(firebaseConfig)
+  : (undefined as unknown as ReturnType<typeof initializeApp>);
+export const firebaseAuth = isBrowser ? getAuth(firebaseApp) : (undefined as unknown as ReturnType<typeof getAuth>);
+export const firestoreDb = isBrowser ? getFirestore(firebaseApp) : (undefined as unknown as ReturnType<typeof getFirestore>);
+export const googleProvider = isBrowser ? new GoogleAuthProvider() : (undefined as unknown as GoogleAuthProvider);
 
-googleProvider.setCustomParameters({
-  prompt: 'select_account',
-});
+if (isBrowser) {
+  googleProvider.setCustomParameters({
+    prompt: 'select_account',
+  });
+}
