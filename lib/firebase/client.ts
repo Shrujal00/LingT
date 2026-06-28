@@ -56,7 +56,7 @@ const buildConfig = normalizeConfig({
   vapidKey: process.env.NEXT_PUBLIC_FIREBASE_VAPID_KEY,
 });
 const browserRuntimeConfig = normalizeConfig(runtimeConfig);
-const firebaseConfig = isCompleteConfig(buildConfig) ? buildConfig : browserRuntimeConfig;
+const firebaseConfig = isCompleteConfig(browserRuntimeConfig) ? browserRuntimeConfig : buildConfig;
 
 export const hasFirebaseConfig = isCompleteConfig(firebaseConfig);
 
