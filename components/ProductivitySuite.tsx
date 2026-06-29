@@ -305,34 +305,67 @@ export default function ProductivitySuite({user, tasks, openLoops, habits}: Prod
     setSaved('Draft saved.');
   }
 
-  const panels = [
-    {label: 'Tasks', value: tasks.length},
-    {label: 'Open loops', value: openLoops.filter((loop) => loop.status === 'open').length},
-    {label: 'Habits', value: habits.length},
+  const openLoopTotal = openLoops.filter((loop) => loop.status === 'open').length;
+  const urgentTask = tasks.find((task) => task.priority === 'do_now' || task.priority === 'at_risk') ?? tasks[0];
+  const cockpitStats = [
+    {
+      label: 'Tasks captured',
+      value: tasks.length,
+      detail: tasks.length ? 'Ready for planning' : 'Start from chat',
+    },
+    {
+      label: 'Open loops',
+      value: openLoopTotal,
+      detail: openLoopTotal ? 'Needs closure' : 'None waiting',
+    },
+    {
+      label: 'Urgent item',
+      value: urgentTask ? urgentTask.priority.replace('_', ' ') : 'None',
+      detail: urgentTask?.title ?? 'No saved task yet',
+    },
+    {
+      label: 'Google status',
+      value: user ? 'Signed in' : 'Guest',
+      detail: user ? 'Workspace sync on' : 'Sign in to save',
+    },
   ];
 
   return (
-    <div className="rounded-xl border border-border bg-surface p-5">
+    <div className="rounded-xl border border-brand/20 bg-surface p-5 shadow-sm animate-lingt-scale-in">
       <div className="flex flex-col justify-between gap-3 md:flex-row md:items-start">
         <div>
           <div className="flex items-center gap-2">
             <Zap className="h-5 w-5 text-brand" />
-            <h2 className="text-xl font-semibold">Productivity suite</h2>
+            <h2 className="text-xl font-semibold">Productivity Cockpit</h2>
           </div>
           <p className="mt-2 text-sm leading-6 text-muted-foreground">
-            Generate plans, calendar proposals, reminders, routines, habits, drafts, and quick captures from saved context.
+            Manage your daily flow and saved tasks: generate a rescue plan, escalate reminders, or suggest calendar schedules.
           </p>
-        </div>
-        <div className="flex gap-2">
-          {panels.map((panel) => (
-            <span key={panel.label} className="rounded-full bg-brand-soft px-2 py-1 text-xs text-brand-deep">
-              {panel.value} {panel.label}
-            </span>
-          ))}
         </div>
       </div>
 
-      <div className="mt-4 rounded-lg border border-border bg-background p-3">
+      <div className="mt-5 grid gap-3 md:grid-cols-4">
+        {cockpitStats.map((stat, i) => {
+          const delays = [
+            'animation-delay-75',
+            'animation-delay-150',
+            'animation-delay-225',
+            'animation-delay-300',
+          ];
+          return (
+            <div 
+              key={stat.label} 
+              className={`rounded-lg border border-border bg-background p-3 transition-all duration-300 hover:border-brand/20 hover:-translate-y-0.5 hover:shadow-sm animate-lingt-rise ${delays[i] || 'animation-delay-75'}`}
+            >
+              <div className="text-xs text-muted-foreground">{stat.label}</div>
+              <div className="mt-1 truncate text-lg font-semibold">{stat.value}</div>
+              <div className="mt-1 truncate text-xs text-muted-foreground">{stat.detail}</div>
+            </div>
+          );
+        })}
+      </div>
+
+      <div className="mt-4 rounded-lg border border-border bg-background p-3 transition-all duration-300 focus-within:border-brand/40 focus-within:shadow-[0_0_15px_rgba(26,115,232,0.08)]">
         <div className="flex flex-col gap-2 md:flex-row">
           <input
             value={quickCapture}
@@ -344,7 +377,7 @@ export default function ProductivitySuite({user, tasks, openLoops, habits}: Prod
             type="button"
             disabled={!user || !quickCapture.trim() || busy === 'quick'}
             onClick={runQuickCapture}
-            className="inline-flex items-center justify-center gap-2 rounded-lg bg-brand px-3 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-50"
+            className="inline-flex items-center justify-center gap-2 rounded-lg bg-brand px-3 py-2 text-sm font-medium text-white transition-all duration-300 hover:bg-brand-deep hover:scale-[1.03] active:scale-[0.97] disabled:cursor-not-allowed disabled:opacity-50 disabled:scale-100"
           >
             {busy === 'quick' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
             Save capture
@@ -360,7 +393,7 @@ export default function ProductivitySuite({user, tasks, openLoops, habits}: Prod
         </div>
       )}
 
-      <div className="mt-5 grid gap-4 lg:grid-cols-2">
+      <div className="mt-5 grid gap-4 lg:grid-cols-3">
         <section className="rounded-lg border border-border bg-background p-4">
           <div className="flex items-center justify-between gap-3">
             <div className="flex items-center gap-2 text-sm font-semibold">
@@ -385,7 +418,35 @@ export default function ProductivitySuite({user, tasks, openLoops, habits}: Prod
               </button>
             </div>
           ) : (
-            <p className="mt-3 text-sm text-muted-foreground">No generated plan yet.</p>
+            <p className="mt-3 text-sm text-muted-foreground">Save chat tasks, then generate the rescue plan.</p>
+          )}
+        </section>
+
+        <section className="rounded-lg border border-border bg-background p-4">
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2 text-sm font-semibold">
+              <Bell className="h-4 w-4 text-danger" />
+              Reminder escalation
+            </div>
+            <button type="button" onClick={escalateReminder} className="rounded-lg bg-brand-soft px-3 py-2 text-xs font-medium text-brand-deep">
+              {busy === 'reminder' ? 'Choosing...' : 'Escalate'}
+            </button>
+          </div>
+          {reminder ? (
+            <div className="mt-3 text-sm">
+              <div className="rounded-md border border-border bg-surface p-2">
+                <div className="font-medium">{reminder.level.replace(/_/g, ' ')}</div>
+                <p className="mt-1 text-xs leading-5 text-muted-foreground">{reminder.message}</p>
+              </div>
+              <button type="button" disabled={!user} onClick={saveReminder} className="mt-2 rounded-lg border border-border bg-surface px-3 py-2 text-xs font-medium">
+                Save reminder
+              </button>
+              <button type="button" disabled={!user} onClick={enableNotifications} className="ml-2 mt-2 rounded-lg border border-border bg-surface px-3 py-2 text-xs font-medium">
+                Enable notifications
+              </button>
+            </div>
+          ) : (
+            <p className="mt-3 text-sm text-muted-foreground">Escalate the most urgent saved task into required responses.</p>
           )}
         </section>
 
@@ -419,35 +480,7 @@ export default function ProductivitySuite({user, tasks, openLoops, habits}: Prod
               ))}
             </div>
           ) : (
-            <p className="mt-3 text-sm text-muted-foreground">Calendar suggestions appear here before any event is created.</p>
-          )}
-        </section>
-
-        <section className="rounded-lg border border-border bg-background p-4">
-          <div className="flex items-center justify-between gap-3">
-            <div className="flex items-center gap-2 text-sm font-semibold">
-              <Bell className="h-4 w-4 text-danger" />
-              Reminder escalation
-            </div>
-            <button type="button" onClick={escalateReminder} className="rounded-lg bg-brand-soft px-3 py-2 text-xs font-medium text-brand-deep">
-              {busy === 'reminder' ? 'Choosing...' : 'Escalate'}
-            </button>
-          </div>
-          {reminder ? (
-            <div className="mt-3 text-sm">
-              <div className="rounded-md border border-border bg-surface p-2">
-                <div className="font-medium">{reminder.level.replace(/_/g, ' ')}</div>
-                <p className="mt-1 text-xs leading-5 text-muted-foreground">{reminder.message}</p>
-              </div>
-              <button type="button" disabled={!user} onClick={saveReminder} className="mt-2 rounded-lg border border-border bg-surface px-3 py-2 text-xs font-medium">
-                Save reminder
-              </button>
-              <button type="button" disabled={!user} onClick={enableNotifications} className="ml-2 mt-2 rounded-lg border border-border bg-surface px-3 py-2 text-xs font-medium">
-                Enable notifications
-              </button>
-            </div>
-          ) : (
-            <p className="mt-3 text-sm text-muted-foreground">Generate a response-required escalation from the top task.</p>
+            <p className="mt-3 text-sm text-muted-foreground">Suggest protected time blocks before any Calendar write.</p>
           )}
         </section>
 

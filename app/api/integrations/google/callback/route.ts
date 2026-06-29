@@ -35,10 +35,14 @@ export async function GET(request: Request) {
       expiresAt: tokens.expires_in ? Date.now() + tokens.expires_in * 1000 : null,
       scope: tokens.scope || '',
       connectedAt: new Date().toISOString(),
+      automationEnabled: true,
+      gmailAutoScanEnabled: true,
+      calendarAssistEnabled: true,
+      autoCommitCalendar: process.env.LINGT_AUTOCOMMIT_CALENDAR === 'true',
       provider: 'google',
     });
 
-    return NextResponse.redirect(`${appUrl()}/integrations?google=connected`);
+    return NextResponse.redirect(`${appUrl()}/integrations?google=connected&scan=1`);
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Google OAuth failed';
     return NextResponse.redirect(

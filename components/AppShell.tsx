@@ -3,18 +3,11 @@
 import Link from 'next/link';
 import {usePathname} from 'next/navigation';
 import {
-  Bell,
-  Calendar,
-  CheckCircle2,
   Home,
   ListChecks,
   Menu,
   MessageCircle,
-  Mic,
-  PenLine,
   Plug,
-  Repeat,
-  Search,
   X,
 } from 'lucide-react';
 import {useState} from 'react';
@@ -30,15 +23,6 @@ const navigation = [
   {name: 'Chat', href: '/chat', icon: MessageCircle},
   {name: 'Workspace', href: '/workspace', icon: ListChecks},
   {name: 'Integrations', href: '/integrations', icon: Plug},
-];
-
-const quickAreas = [
-  {name: 'Mira', role: 'Memory', icon: Search, color: 'text-[#8430ce]'},
-  {name: 'Rumi', role: 'Routines', icon: Repeat, color: 'text-[#64748b]'},
-  {name: 'Nia', role: 'Meetings', icon: Mic, color: 'text-[#4285f4]'},
-  {name: 'Dax', role: 'Drafts', icon: PenLine, color: 'text-[#fbbc04]'},
-  {name: 'Cal', role: 'Calendar', icon: Calendar, color: 'text-[#34a853]'},
-  {name: 'Remy', role: 'Reminders', icon: Bell, color: 'text-[#ea4335]'},
 ];
 
 export default function AppShell({children}: AppShellProps) {
@@ -66,49 +50,21 @@ export default function AppShell({children}: AppShellProps) {
                 key={item.href}
                 href={item.href}
                 className={cn(
-                  'flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm transition',
+                  'flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm transition-all duration-300 ease-out active:scale-[0.98]',
                   active
-                    ? 'bg-brand-soft text-brand-deep'
-                    : 'text-muted-foreground hover:bg-surface-muted hover:text-foreground',
+                    ? 'bg-brand-soft text-brand-deep font-semibold shadow-sm translate-x-1'
+                    : 'text-muted-foreground hover:bg-surface-muted hover:text-foreground hover:translate-x-1',
                 )}
               >
-                <item.icon className="h-4 w-4" />
+                <item.icon className={cn('h-4 w-4 transition-transform duration-300', active && 'scale-110')} />
                 {item.name}
               </Link>
             );
           })}
         </nav>
 
-        <div className="mt-8">
-          <div className="px-3 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-            LingT team
-          </div>
-          <div className="mt-3 space-y-2">
-            {quickAreas.map((area) => (
-              <div key={area.name} className="flex items-center gap-3 rounded-lg px-3 py-2 text-sm">
-                <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-border bg-background">
-                  <area.icon className={cn('h-4 w-4', area.color)} />
-                </div>
-                <div className="min-w-0">
-                  <div className="font-medium leading-tight">{area.name}</div>
-                  <div className="truncate text-xs text-muted-foreground">{area.role}</div>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        <div className="mt-auto space-y-3">
+        <div className="mt-auto">
           <AuthPanel />
-          <div className="rounded-lg border border-border bg-surface-muted p-3">
-            <div className="flex items-center gap-2 text-sm font-medium">
-              <CheckCircle2 className="h-4 w-4 text-success" />
-              Firebase connected
-            </div>
-            <p className="mt-2 text-xs leading-5 text-muted-foreground">
-              Google sign-in and Firestore persistence are active.
-            </p>
-          </div>
         </div>
       </aside>
 

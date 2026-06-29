@@ -18,6 +18,11 @@ export interface StoredGoogleIntegration {
   expiresAt?: number;
   scope?: string;
   connectedAt?: string;
+  automationEnabled?: boolean;
+  gmailAutoScanEnabled?: boolean;
+  calendarAssistEnabled?: boolean;
+  autoCommitCalendar?: boolean;
+  timezone?: string;
 }
 
 export const googleScopes = [

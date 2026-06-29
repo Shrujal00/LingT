@@ -4,6 +4,7 @@ import AppShell from '@/components/AppShell';
 import {onAuthStateChanged, type User} from 'firebase/auth';
 import {
   AlarmClock,
+  ArrowRight,
   Bot,
   Brain,
   Calendar,
@@ -14,6 +15,7 @@ import {
   Send,
   Sparkles,
 } from 'lucide-react';
+import Link from 'next/link';
 import {useEffect, useRef, useState} from 'react';
 import type {OrchestrationResult} from '@/lib/orchestration/schemas';
 import {firebaseAuth} from '@/lib/firebase/client';
@@ -274,21 +276,24 @@ export default function ChatPage() {
           <div className="flex-1 overflow-y-auto px-4 py-5 md:px-6">
             <div className="mx-auto max-w-3xl space-y-5">
               {messages.map((message) => (
-                <div key={message.id} className={message.role === 'user' ? 'flex justify-end' : 'flex justify-start gap-3'}>
+                <div 
+                  key={message.id} 
+                  className={message.role === 'user' ? 'flex justify-end animate-lingt-message-in-right' : 'flex justify-start gap-3 animate-lingt-message-in-left'}
+                >
                   {message.role === 'ling' && (
-                    <div className="mt-1 flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-border bg-surface">
-                      <Bot className="h-4 w-4 text-brand" />
+                    <div className="mt-1 flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-border bg-surface shadow-sm transition-transform duration-300 hover:rotate-6">
+                      <Bot className="h-4 w-4 text-brand animate-pulse" />
                     </div>
                   )}
                   <div className={message.role === 'user' ? 'max-w-[84%]' : 'max-w-[88%]'}>
                     <div
                       className={
                         message.role === 'user'
-                          ? 'rounded-xl bg-brand px-4 py-3 text-sm leading-6 text-white'
-                          : 'rounded-xl border border-border bg-surface px-4 py-3 text-sm leading-6'
+                          ? 'rounded-xl bg-brand px-4 py-3 text-sm leading-6 text-white shadow-sm hover:shadow-md transition-shadow duration-300'
+                          : 'rounded-xl border border-border bg-surface px-4 py-3 text-sm leading-6 shadow-sm hover:shadow-md transition-all duration-300 hover:border-brand/10'
                       }
                     >
-                      <div className="mb-1 text-xs font-medium opacity-70">
+                      <div className="mb-1 text-xs font-semibold opacity-70">
                         {message.role === 'user' ? 'You' : 'Ling'}
                       </div>
                       {message.text}
@@ -343,12 +348,29 @@ export default function ChatPage() {
                           message.orchestration.openLoops.length > 0 ||
                           message.orchestration.approvals.length > 0) && (
                           <>
+                            <div className="rounded-lg border border-brand/20 bg-brand-soft p-3">
+                              <div className="grid gap-2 text-xs text-brand-deep sm:grid-cols-3">
+                                <div className="flex items-center gap-2">
+                                  <span className="flex h-5 w-5 items-center justify-center rounded-full bg-white font-semibold">1</span>
+                                  Review extracted work
+                                </div>
+                                <div className="flex items-center gap-2">
+                                  <span className="flex h-5 w-5 items-center justify-center rounded-full bg-white font-semibold">2</span>
+                                  Save to workspace
+                                </div>
+                                <div className="flex items-center gap-2">
+                                  <span className="flex h-5 w-5 items-center justify-center rounded-full bg-white font-semibold">3</span>
+                                  Run plan, reminder, calendar
+                                </div>
+                              </div>
+                            </div>
+
                             <div className="flex flex-wrap items-center gap-2">
                               <button
                                 type="button"
                                 disabled={!user || savingMessageId === message.id || savedMessageIds.includes(message.id)}
                                 onClick={() => addToWorkspace(message)}
-                                className="inline-flex items-center gap-2 rounded-lg bg-brand px-3 py-2 text-xs font-medium text-white disabled:cursor-not-allowed disabled:opacity-50"
+                                className="inline-flex items-center gap-2 rounded-lg bg-brand px-4 py-2.5 text-sm font-semibold text-white shadow-sm disabled:cursor-not-allowed disabled:opacity-50"
                               >
                                 {savedMessageIds.includes(message.id) ? (
                                   <CheckCircle2 className="h-4 w-4" />
@@ -361,6 +383,13 @@ export default function ChatPage() {
                                     ? 'Adding...'
                                     : 'Add to workspace'}
                               </button>
+                              <Link
+                                href="/workspace"
+                                className="inline-flex items-center gap-2 rounded-lg border border-border bg-surface px-4 py-2.5 text-sm font-semibold"
+                              >
+                                Open guided workspace
+                                <ArrowRight className="h-4 w-4" />
+                              </Link>
                               {!user && (
                                 <span className="text-xs text-muted-foreground">
                                   Sign in first to save this plan.
@@ -396,22 +425,15 @@ export default function ChatPage() {
               ))}
 
               {isThinking && (
-                <div className="flex justify-start gap-3">
+                <div className="flex justify-start gap-3 animate-lingt-message-in-left">
                   <div className="mt-1 flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-border bg-surface">
                     <Bot className="h-4 w-4 text-brand" />
                   </div>
-                  <div className="rounded-xl border border-border bg-surface px-4 py-3 text-sm text-muted-foreground">
-                    <div>LingT team is working.</div>
-                    <div className="mt-3 flex gap-2">
-                      {teamAgents.slice(0, 5).map((agent) => (
-                        <div
-                          key={agent.id}
-                          className="flex h-8 w-8 items-center justify-center rounded-full border border-brand/30 bg-brand-soft"
-                          title={`${agent.name} - ${agent.role}`}
-                        >
-                          <agent.icon className={`h-4 w-4 ${agent.color}`} />
-                        </div>
-                      ))}
+                  <div className="rounded-xl border border-border bg-surface px-4 py-3.5">
+                    <div className="flex items-center gap-1.5">
+                      <span className="h-2 w-2 rounded-full bg-brand/60 animate-bounce" style={{animationDelay: '0ms'}} />
+                      <span className="h-2 w-2 rounded-full bg-brand/60 animate-bounce" style={{animationDelay: '150ms'}} />
+                      <span className="h-2 w-2 rounded-full bg-brand/60 animate-bounce" style={{animationDelay: '300ms'}} />
                     </div>
                   </div>
                 </div>
@@ -428,7 +450,7 @@ export default function ChatPage() {
                     key={suggestion}
                     type="button"
                     onClick={() => sendMessage(suggestion)}
-                    className="rounded-full border border-border bg-background px-3 py-1.5 text-xs text-muted-foreground transition hover:border-brand hover:text-brand"
+                    className="rounded-full border border-border bg-background px-3.5 py-1.8 text-xs text-muted-foreground transition-all duration-300 hover:border-brand/40 hover:text-brand hover:-translate-y-0.5 active:scale-[0.97] hover:bg-brand-soft/10"
                   >
                     {suggestion}
                   </button>
@@ -439,15 +461,19 @@ export default function ChatPage() {
                   event.preventDefault();
                   sendMessage();
                 }}
-                className="flex gap-2 rounded-xl border border-border bg-background p-2"
+                className="flex gap-2 rounded-xl border border-border bg-background p-2 transition-all duration-300 focus-within:border-brand/45 focus-within:shadow-[0_0_18px_rgba(26,115,232,0.1)]"
               >
                 <input
                   value={input}
                   onChange={(event) => setInput(event.target.value)}
                   placeholder="Ask Ling to plan, remember, schedule, or draft..."
-                  className="min-w-0 flex-1 bg-transparent px-3 text-sm outline-none"
+                  className="min-w-0 flex-1 bg-transparent px-3 text-sm outline-none placeholder:text-muted-foreground/60"
                 />
-                <button className="rounded-lg bg-brand p-3 text-white" type="submit" aria-label="Send">
+                <button 
+                  className="rounded-lg bg-brand p-3 text-white transition-all duration-300 hover:bg-brand-deep hover:scale-[1.04] active:scale-[0.96] flex items-center justify-center" 
+                  type="submit" 
+                  aria-label="Send"
+                >
                   <Send className="h-4 w-4" />
                 </button>
               </form>
@@ -456,46 +482,46 @@ export default function ChatPage() {
         </section>
 
         <aside className="hidden overflow-y-auto bg-surface-warm p-5 lg:block">
-          <div>
-            <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">LingT team</p>
-            <h2 className="mt-2 font-display text-2xl">Quiet until needed.</h2>
-            <p className="mt-2 text-sm leading-6 text-muted-foreground">
-              Agents wake up from the conversation and hand work back to Ling for approval.
-            </p>
+          <div className="flex items-center justify-between gap-2">
+            <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">Team</p>
+            <span className="text-[10px] text-muted-foreground">
+              {isThinking ? 'working' : activeAgents.length > 1 ? `${activeAgents.length} active` : 'standby'}
+            </span>
           </div>
 
-          <div className="mt-5 space-y-3">
-            {teamAgents.map((agent) => {
-              const active = activeAgents.some((item) => item.id === agent.id);
-              return (
+          {activeAgents.length > 1 || isThinking ? (
+            <div className="mt-4 space-y-2.5">
+              {activeAgents.map((agent) => (
                 <div key={agent.id} className="flex items-center gap-3">
-                  <div
-                    className={
-                      active
-                        ? 'flex h-10 w-10 items-center justify-center rounded-full border border-brand/30 bg-brand-soft'
-                        : 'flex h-10 w-10 items-center justify-center rounded-full border border-border bg-surface'
-                    }
-                  >
+                  <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-brand/30 bg-brand-soft animate-lingt-pulse-glow">
                     <agent.icon className={`h-4 w-4 ${agent.color}`} />
                   </div>
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="text-sm font-medium">{agent.name}</span>
-                      <span className={active ? 'text-xs text-brand' : 'text-xs text-muted-foreground'}>
-                        {active ? 'active' : 'idle'}
-                      </span>
-                    </div>
-                    <div className="text-xs text-muted-foreground">{agent.role}</div>
+                  <div>
+                    <div className="text-sm font-medium">{agent.name}</div>
+                    <div className="text-[11px] text-muted-foreground">{agent.role}</div>
                   </div>
                 </div>
-              );
-            })}
-          </div>
+              ))}
+            </div>
+          ) : (
+            <div className="mt-3 flex flex-wrap gap-1.5">
+              {teamAgents.map((agent) => (
+                <div
+                  key={agent.id}
+                  className="flex h-7 w-7 items-center justify-center rounded-full border border-border bg-surface"
+                  title={`${agent.name} · ${agent.role}`}
+                >
+                  <agent.icon className={`h-3.5 w-3.5 ${agent.color} opacity-50`} />
+                </div>
+              ))}
+              <p className="mt-2 w-full text-xs text-muted-foreground">Send something to wake the team.</p>
+            </div>
+          )}
 
-          <div className="mt-6 border-t border-border pt-5">
+          <div className="mt-5 border-t border-border pt-4">
             {!latestHasWork ? (
-              <p className="text-sm leading-6 text-muted-foreground">
-                Send a deadline, email, meeting note, or messy list. Ling will build the workspace from there.
+              <p className="text-xs leading-5 text-muted-foreground">
+                Send a deadline or messy list. Ling builds the workspace from there.
               </p>
             ) : (
               <div className="grid grid-cols-3 gap-2 text-center">
@@ -509,7 +535,7 @@ export default function ChatPage() {
                 </div>
                 <div>
                   <div className="text-xl font-semibold">{latestResult?.approvals.length ?? 0}</div>
-                  <div className="text-[11px] text-muted-foreground">approvals</div>
+                  <div className="text-[11px] text-muted-foreground">pending</div>
                 </div>
               </div>
             )}

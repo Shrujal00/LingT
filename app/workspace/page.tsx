@@ -176,6 +176,8 @@ export default function WorkspacePage() {
 
         <div className="mt-6 grid gap-6 lg:grid-cols-[minmax(0,1fr)_360px]">
           <section className="space-y-6">
+            <ProductivitySuite user={user} tasks={tasks} openLoops={openLoops} habits={habits} />
+
             <div className="rounded-xl border border-border bg-surface p-5">
               <div className="flex items-center justify-between gap-4">
                 <div>
@@ -192,27 +194,38 @@ export default function WorkspacePage() {
                     No saved tasks yet. Ask Ling in chat, then add the plan to your workspace.
                   </div>
                 )}
-                {tasks.map((task) => (
-                  <div key={task.id} className="rounded-lg border border-border bg-background p-4">
-                    <div className="flex items-start justify-between gap-3">
-                      <div>
-                        <div className="font-medium">{task.title}</div>
-                        <div className="mt-1 text-sm text-muted-foreground">{task.reason}</div>
+                {tasks.map((task, i) => {
+                  const delays = [
+                    'animation-delay-75',
+                    'animation-delay-150',
+                    'animation-delay-225',
+                    'animation-delay-300',
+                    'animation-delay-375',
+                    'animation-delay-450',
+                  ];
+                  return (
+                    <div 
+                      key={task.id} 
+                      className={`rounded-lg border border-border bg-background p-4 transition-all duration-300 hover:border-brand/20 hover:-translate-y-0.5 hover:shadow-sm animate-lingt-scale-in ${delays[i] || 'animation-delay-75'}`}
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <div className="font-medium">{task.title}</div>
+                          <div className="mt-1 text-sm text-muted-foreground">{task.reason}</div>
+                        </div>
+                        <span className="rounded-full bg-brand-soft px-2 py-1 text-[11px] text-brand-deep">
+                          {task.priority.replace('_', ' ')}
+                        </span>
                       </div>
-                      <span className="rounded-full bg-brand-soft px-2 py-1 text-[11px] text-brand-deep">
-                        {task.priority.replace('_', ' ')}
-                      </span>
+                      <div className="mt-3 flex items-center justify-between text-xs text-muted-foreground">
+                        <span>Due: {task.due}</span>
+                        <span>{statusLabel(task.status)}</span>
+                      </div>
                     </div>
-                    <div className="mt-3 flex items-center justify-between text-xs text-muted-foreground">
-                      <span>Due: {task.due}</span>
-                      <span>{statusLabel(task.status)}</span>
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
-
-            <ProductivitySuite user={user} tasks={tasks} openLoops={openLoops} habits={habits} />
 
             <div className="rounded-xl border border-border bg-surface p-5">
               <div className="flex items-center justify-between gap-4">
@@ -225,40 +238,53 @@ export default function WorkspacePage() {
                 <Bell className="h-5 w-5 text-danger" />
               </div>
               <div className="mt-4 grid gap-3 md:grid-cols-2">
-                {openLoops.map((loop) => (
-                  <div key={loop.id} className="rounded-lg border border-border bg-background p-4">
-                    <div className="flex items-start justify-between gap-3">
-                      <div>
-                        <div className="font-medium">{loop.title}</div>
-                        <div className="mt-1 text-sm text-muted-foreground">{loop.reason}</div>
+                {openLoops.map((loop, i) => {
+                  const delays = [
+                    'animation-delay-75',
+                    'animation-delay-150',
+                    'animation-delay-225',
+                    'animation-delay-300',
+                    'animation-delay-375',
+                    'animation-delay-450',
+                  ];
+                  return (
+                    <div 
+                      key={loop.id} 
+                      className={`rounded-lg border border-border bg-background p-4 transition-all duration-300 hover:border-brand/20 hover:-translate-y-0.5 hover:shadow-sm animate-lingt-scale-in ${delays[i] || 'animation-delay-75'}`}
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <div className="font-medium">{loop.title}</div>
+                          <div className="mt-1 text-sm text-muted-foreground">{loop.reason}</div>
+                        </div>
+                        <span className="rounded-full bg-brand-soft px-2 py-1 text-[11px] text-brand-deep">
+                          {statusLabel(loop.status)}
+                        </span>
                       </div>
-                      <span className="rounded-full bg-brand-soft px-2 py-1 text-[11px] text-brand-deep">
-                        {statusLabel(loop.status)}
-                      </span>
+                      <div className="mt-4 flex flex-wrap gap-2">
+                        <button
+                          className="rounded-lg bg-brand px-3 py-2 text-sm font-medium text-white transition-all duration-300 hover:bg-brand-deep hover:scale-[1.03] active:scale-[0.97] disabled:opacity-50 disabled:scale-100"
+                          disabled={loop.status === 'resolved'}
+                          onClick={() => setOpenLoopStatus(loop.id, 'resolved')}
+                        >
+                          Done
+                        </button>
+                        <button
+                          className="rounded-lg border border-border bg-surface px-3 py-2 text-sm font-medium transition-all duration-300 hover:bg-surface-muted hover:border-brand/35 hover:scale-[1.03] active:scale-[0.97]"
+                          onClick={() => setOpenLoopStatus(loop.id, 'scheduled')}
+                        >
+                          {loop.action}
+                        </button>
+                        <button
+                          className="rounded-lg border border-border bg-surface px-3 py-2 text-sm font-medium text-muted-foreground transition-all duration-300 hover:bg-surface-muted hover:text-foreground hover:scale-[1.03] active:scale-[0.97]"
+                          onClick={() => setOpenLoopStatus(loop.id, 'snoozed')}
+                        >
+                          Snooze
+                        </button>
+                      </div>
                     </div>
-                    <div className="mt-4 flex flex-wrap gap-2">
-                      <button
-                        className="rounded-lg bg-brand px-3 py-2 text-sm font-medium text-white disabled:opacity-50"
-                        disabled={loop.status === 'resolved'}
-                        onClick={() => setOpenLoopStatus(loop.id, 'resolved')}
-                      >
-                        Done
-                      </button>
-                      <button
-                        className="rounded-lg border border-border bg-surface px-3 py-2 text-sm font-medium"
-                        onClick={() => setOpenLoopStatus(loop.id, 'scheduled')}
-                      >
-                        {loop.action}
-                      </button>
-                      <button
-                        className="rounded-lg border border-border bg-surface px-3 py-2 text-sm font-medium text-muted-foreground"
-                        onClick={() => setOpenLoopStatus(loop.id, 'snoozed')}
-                      >
-                        Snooze
-                      </button>
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
                 {openLoops.length === 0 && (
                   <div className="rounded-lg border border-dashed border-border bg-background p-4 text-sm text-muted-foreground md:col-span-2">
                     No open loops yet. Add a plan from chat to start tracking unresolved commitments.

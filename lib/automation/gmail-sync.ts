@@ -108,6 +108,10 @@ export async function runConnectedGmailScan(
   userId: string,
   options: {limit?: number; timezone?: string; autoCommitCalendar?: boolean} = {},
 ): Promise<GmailScanResult> {
+  const integration = await getServerDocument<{
+    timezone?: string;
+    autoCommitCalendar?: boolean;
+  }>('googleIntegrations', userId);
   const limit = Math.min(Math.max(options.limit ?? 10, 1), 25);
   const listed = await listUnreadMessages(userId, limit);
   const messages = listed.messages ?? [];
@@ -130,8 +134,8 @@ export async function runConnectedGmailScan(
         receivedAt: message.internalDate ? new Date(Number(message.internalDate)).toISOString() : header(message, 'date'),
         snippet: message.snippet,
         body: extractBody(message.payload) || message.snippet || '',
-        timezone: options.timezone,
-        autoCommitCalendar: options.autoCommitCalendar === true,
+        timezone: options.timezone || integration?.timezone,
+        autoCommitCalendar: options.autoCommitCalendar === true || integration?.autoCommitCalendar === true,
       });
       await markProcessed(userId, item.id);
       result.processed += 1;
@@ -158,6 +162,9 @@ export async function listConnectedGoogleUsers(maxResults = 50) {
     .get();
 
   return snapshot.docs
-    .map((item) => item.data() as {userId?: string; refreshToken?: string})
-    .filter((item): item is {userId: string; refreshToken: string} => Boolean(item.userId && item.refreshToken));
+    .map((item) => item.data() as {userId?: string; refreshToken?: string; automationEnabled?: boolean; gmailAutoScanEnabled?: boolean})
+    .filter(
+      (item): item is {userId: string; refreshToken: string} =>
+        Boolean(item.userId && item.refreshToken && item.automationEnabled && item.gmailAutoScanEnabled),
+    );
 }
