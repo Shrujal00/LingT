@@ -1,7 +1,8 @@
 'use client';
 
-import {firebaseAuth, googleProvider} from '@/lib/firebase/client';
+import {firebaseAuth, googleProvider, firestoreDb} from '@/lib/firebase/client';
 import {saveUserProfile, type LingTProfile} from '@/lib/firebase/profile';
+import {collection, doc, setDoc} from 'firebase/firestore';
 import {onAuthStateChanged, signInWithPopup, signOut, type User} from 'firebase/auth';
 import {
   ArrowLeft,
@@ -248,6 +249,23 @@ export default function OnboardingPage() {
         topGoal: profile.topGoal.trim(),
         onboardingComplete: true,
       });
+
+      if (profile.topGoal.trim()) {
+        const tasksRef = collection(firestoreDb, 'tasks');
+        const taskDoc = doc(tasksRef);
+        await setDoc(taskDoc, {
+          id: taskDoc.id,
+          userId: user.uid,
+          title: profile.topGoal.trim(),
+          reason: 'Your primary onboarding focus and goal.',
+          status: 'open',
+          priority: 'do_now',
+          due: new Date().toISOString().split('T')[0],
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        });
+      }
+
       setStep('done');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unable to save preferences.');
