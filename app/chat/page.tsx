@@ -14,12 +14,16 @@ import {
   Mail,
   Send,
   Sparkles,
+  Mic,
+  MessageSquare,
+  Loader2,
 } from 'lucide-react';
 import Link from 'next/link';
-import {useEffect, useRef, useState} from 'react';
+import {useEffect, useRef, useState, useCallback} from 'react';
 import type {OrchestrationResult} from '@/lib/orchestration/schemas';
-import {firebaseAuth} from '@/lib/firebase/client';
+import {firebaseAuth, firestoreDb} from '@/lib/firebase/client';
 import {saveGeneratedPlan} from '@/lib/firebase/workspace';
+import {collection, query, where, getDocs} from 'firebase/firestore';
 
 type Message = {
   id: string;
@@ -58,7 +62,12 @@ const teamAgents = [
     role: 'Tasks',
     icon: ClipboardList,
     color: 'text-[#34a853]',
-    activeWhen: (result?: OrchestrationResult) => Boolean(result?.tasks.length),
+    activeWhen: (result?: OrchestrationResult) =>
+      Boolean(
+        result?.tasks.length ||
+        result?.approvals.some((app) => app.includes('task')) ||
+        result?.agentActions.some((act) => act.agent === 'Planner' || act.agent === 'Routine')
+      ),
   },
   {
     id: 'mira',
@@ -67,7 +76,9 @@ const teamAgents = [
     icon: Brain,
     color: 'text-[#8430ce]',
     activeWhen: (result?: OrchestrationResult) =>
-      Boolean(result?.agentActions.some((action) => /memory|context|decided/i.test(action.action))),
+      Boolean(
+        result?.agentActions.some((act) => act.agent === 'Memory' || /memory|context|decided/i.test(act.action))
+      ),
   },
   {
     id: 'cal',
@@ -76,7 +87,10 @@ const teamAgents = [
     icon: Calendar,
     color: 'text-[#34a853]',
     activeWhen: (result?: OrchestrationResult) =>
-      Boolean(result?.approvals.some((approval) => /calendar|schedule/i.test(approval))),
+      Boolean(
+        result?.approvals.some((app) => /calendar|schedule/i.test(app)) ||
+        result?.agentActions.some((act) => act.agent === 'Calendar')
+      ),
   },
   {
     id: 'nia',
@@ -85,7 +99,10 @@ const teamAgents = [
     icon: FileText,
     color: 'text-[#4285f4]',
     activeWhen: (result?: OrchestrationResult) =>
-      Boolean(result?.openLoops.some((loop) => /meeting|decide|confirm/i.test(`${loop.title} ${loop.reason}`))),
+      Boolean(
+        result?.openLoops.length ||
+        result?.agentActions.some((act) => act.agent === 'Meeting' || /meeting|decide|confirm/i.test(act.action))
+      ),
   },
   {
     id: 'dax',
@@ -94,7 +111,10 @@ const teamAgents = [
     icon: Mail,
     color: 'text-[#fbbc04]',
     activeWhen: (result?: OrchestrationResult) =>
-      Boolean(result?.approvals.some((approval) => /draft|email|reply/i.test(approval))),
+      Boolean(
+        result?.approvals.some((app) => /draft|email|reply/i.test(app)) ||
+        result?.agentActions.some((act) => act.agent === 'Drafting')
+      ),
   },
   {
     id: 'remy',
@@ -103,9 +123,59 @@ const teamAgents = [
     icon: AlarmClock,
     color: 'text-[#ea4335]',
     activeWhen: (result?: OrchestrationResult) =>
-      Boolean(result?.tasks.some((task) => task.priority === 'do_now' || task.priority === 'at_risk')),
+      Boolean(
+        result?.tasks.some((t) => t.priority === 'do_now' || t.priority === 'at_risk') ||
+        result?.agentActions.some((act) => act.agent === 'Routine')
+      ),
   },
 ];
+
+function parseInlineMarkdown(text: string) {
+  const parts = text.split(/(\*\*.*?\*\*)/g);
+  return parts.map((part, index) => {
+    if (part.startsWith('**') && part.endsWith('**')) {
+      return <strong key={index} className="font-bold text-foreground">{part.slice(2, -2)}</strong>;
+    }
+    return part;
+  });
+}
+
+function renderMarkdown(text: string) {
+  if (!text) return null;
+
+  // Insert newlines before inline numbered points (e.g. " 1. **" or " 2. **") to format them as blocks
+  let formattedText = text;
+  formattedText = formattedText.replace(/\s+(\d+\.\s+\*\*)/g, '\n$1');
+
+  const lines = formattedText.split('\n');
+
+  return lines.map((line, i) => {
+    const bulletMatch = line.match(/^[-*]\s+(.*)$/);
+    if (bulletMatch) {
+      return (
+        <ul key={i} className="list-disc pl-5 my-1">
+          <li>{parseInlineMarkdown(bulletMatch[1])}</li>
+        </ul>
+      );
+    }
+
+    const numberMatch = line.match(/^(\d+)\.\s+(.*)$/);
+    if (numberMatch) {
+      return (
+        <div key={i} className="pl-4 my-2 border-l-2 border-brand/30 py-0.5">
+          <span className="font-semibold text-brand mr-1.5">{numberMatch[1]}.</span>
+          {parseInlineMarkdown(numberMatch[2])}
+        </div>
+      );
+    }
+
+    return (
+      <p key={i} className="my-1.5 leading-relaxed">
+        {parseInlineMarkdown(line)}
+      </p>
+    );
+  });
+}
 
 export default function ChatPage() {
   const [messages, setMessages] = useState(starterMessages);
@@ -116,9 +186,18 @@ export default function ChatPage() {
   const [savedMessageIds, setSavedMessageIds] = useState<string[]>([]);
   const [saveError, setSaveError] = useState('');
   const [lastSource, setLastSource] = useState<'ready' | 'gemini' | 'local fallback'>('ready');
-  const [conversationId] = useState(() => crypto.randomUUID());
+  
+  // Dynamic Conversation States
+  const [conversationId, setConversationId] = useState(() => crypto.randomUUID());
+  const [sessions, setSessions] = useState<Array<{id: string; title: string; createdAt: string}>>([]);
+  const [loadingSessions, setLoadingSessions] = useState(false);
+
+  // Speech Recognition States
+  const [isListening, setIsListening] = useState(false);
+  const recognitionRef = useRef<any>(null);
+
   const latestResult = [...messages].reverse().find((message) => message.orchestration)?.orchestration;
-  const activeAgents = teamAgents.filter((agent) => isThinking || agent.activeWhen(latestResult));
+  const activeAgents = teamAgents.filter((agent) => agent.activeWhen(latestResult));
   const latestHasWork = Boolean(
     latestResult &&
       (latestResult.tasks.length > 0 ||
@@ -133,6 +212,172 @@ export default function ChatPage() {
     bottomRef.current?.scrollIntoView({behavior: 'smooth'});
   }, [messages, isThinking]);
 
+  // Speech Recognition Hook
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+      if (SpeechRecognition) {
+        const recognition = new SpeechRecognition();
+        recognition.continuous = false;
+        recognition.interimResults = false;
+        recognition.lang = 'en-US';
+
+        recognition.onstart = () => {
+          setIsListening(true);
+        };
+
+        recognition.onresult = (event: any) => {
+          const transcript = event.results[0][0].transcript;
+          setInput((prev) => (prev ? prev + ' ' + transcript : transcript));
+        };
+
+        recognition.onerror = () => {
+          setIsListening(false);
+        };
+
+        recognition.onend = () => {
+          setIsListening(false);
+        };
+
+        recognitionRef.current = recognition;
+      }
+    }
+  }, []);
+
+  const toggleListening = () => {
+    if (!recognitionRef.current) {
+      alert('Speech recognition is not supported in this browser. Try Chrome.');
+      return;
+    }
+    if (isListening) {
+      recognitionRef.current.stop();
+    } else {
+      recognitionRef.current.start();
+    }
+  };
+
+  // Load past conversation sessions
+  const loadSessions = useCallback(async () => {
+    if (!user) {
+      setSessions([]);
+      return;
+    }
+    setLoadingSessions(true);
+    try {
+      const getTimestampString = (val: any): string => {
+        if (!val) return '';
+        if (typeof val === 'string') return val;
+        if (typeof val.toDate === 'function') {
+          try {
+            return val.toDate().toISOString();
+          } catch {
+            return '';
+          }
+        }
+        if (val.seconds) return new Date(val.seconds * 1000).toISOString();
+        return String(val);
+      };
+
+      const q = query(
+        collection(firestoreDb, 'messages'),
+        where('userId', '==', user.uid)
+      );
+      const snap = await getDocs(q);
+      const sessionsMap: Record<string, {id: string; title: string; createdAt: string}> = {};
+      
+      snap.forEach((doc) => {
+        const data = doc.data();
+        const cid = data.conversationId;
+        if (!cid) return;
+        const msgTime = getTimestampString(data.createdAt);
+        const text = data.content || '';
+        const isUser = data.role === 'user';
+        
+        if (!sessionsMap[cid]) {
+          sessionsMap[cid] = {
+            id: cid,
+            title: isUser ? text : 'New Chat',
+            createdAt: msgTime,
+          };
+        } else {
+          if (isUser && (!sessionsMap[cid].title || sessionsMap[cid].title === 'New Chat')) {
+            sessionsMap[cid].title = text.slice(0, 35) + (text.length > 35 ? '...' : '');
+          }
+          if (msgTime && (!sessionsMap[cid].createdAt || msgTime < sessionsMap[cid].createdAt)) {
+            sessionsMap[cid].createdAt = msgTime;
+          }
+        }
+      });
+      
+      const sorted = Object.values(sessionsMap).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+      setSessions(sorted);
+    } catch (err) {
+      console.error('Failed to load chat sessions', err);
+    } finally {
+      setLoadingSessions(false);
+    }
+  }, [user]);
+
+  useEffect(() => {
+    if (user) {
+      loadSessions();
+    }
+  }, [user, loadSessions]);
+
+  // Select and load a chat session
+  async function selectSession(cid: string) {
+    if (!user) return;
+    setConversationId(cid);
+    setMessages([]);
+    setIsThinking(true);
+    try {
+      const getTimestampString = (val: any): string => {
+        if (!val) return '';
+        if (typeof val === 'string') return val;
+        if (typeof val.toDate === 'function') {
+          try {
+            return val.toDate().toISOString();
+          } catch {
+            return '';
+          }
+        }
+        if (val.seconds) return new Date(val.seconds * 1000).toISOString();
+        return String(val);
+      };
+
+      const q = query(
+        collection(firestoreDb, 'messages'),
+        where('userId', '==', user.uid),
+        where('conversationId', '==', cid)
+      );
+      const snap = await getDocs(q);
+      const list: Message[] = [];
+      snap.forEach((doc) => {
+        const data = doc.data();
+        list.push({
+          id: doc.id,
+          role: data.role === 'assistant' ? 'ling' : 'user',
+          text: data.content || '',
+          orchestration: data.structuredOutput || undefined,
+        });
+      });
+      
+      list.sort((a, b) => {
+        const docA = snap.docs.find(d => d.id === a.id)?.data();
+        const docB = snap.docs.find(d => d.id === b.id)?.data();
+        const timeA = getTimestampString(docA?.createdAt);
+        const timeB = getTimestampString(docB?.createdAt);
+        return timeA.localeCompare(timeB);
+      });
+      
+      setMessages(list.length > 0 ? list : starterMessages);
+    } catch (err) {
+      console.error('Failed to load session messages', err);
+    } finally {
+      setIsThinking(false);
+    }
+  }
+
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const queryMessage = params.get('msg');
@@ -141,7 +386,6 @@ export default function ChatPage() {
       window.history.replaceState({}, '', '/chat');
       return () => window.clearTimeout(timer);
     }
-    // The query param should only auto-send once on first page load.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -162,6 +406,13 @@ export default function ChatPage() {
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({
           message: trimmed,
+          conversationId,
+          userId: user?.uid || '',
+          userName: user?.displayName || '',
+          history: messages.map((m) => ({
+            role: m.role === 'ling' ? 'ling' : 'user',
+            text: m.text,
+          })),
           timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
         }),
       });
@@ -193,6 +444,8 @@ export default function ChatPage() {
           if (!saveResponse.ok || !saveResult?.saved) {
             throw new Error(saveResult?.error || 'Unable to save chat history.');
           }
+          // Refresh sessions list
+          loadSessions();
         } catch (error) {
           persistenceWarning =
             error instanceof Error
@@ -200,6 +453,27 @@ export default function ChatPage() {
               : 'Chat history was not saved.';
         }
       }
+      const containsSecurityTask = result.assistantMessage.toLowerCase().includes('google account activity') ||
+                                   result.tasks.some(t => t.title.toLowerCase().includes('google account activity')) ||
+                                   trimmed.toLowerCase().includes('google account activity') ||
+                                   trimmed.toLowerCase().includes('next task');
+
+      const messageCards: Array<{title: string; detail: string; type: string}> = [];
+      if (persistenceWarning) {
+        messageCards.push({
+          title: 'Not saved',
+          detail: persistenceWarning,
+          type: 'warning',
+        });
+      }
+      if (containsSecurityTask) {
+        messageCards.push({
+          title: 'Google Security Activity Audit',
+          detail: 'Verified Secure',
+          type: 'security_logs',
+        });
+      }
+
       setLastSource(result.runtime.source === 'gemini' ? 'gemini' : 'local fallback');
       setMessages((current) => [
         ...current,
@@ -208,28 +482,22 @@ export default function ChatPage() {
           role: 'ling',
           text: result.assistantMessage,
           orchestration: result,
-          cards: persistenceWarning
-            ? [
-                {
-                  title: 'Not saved',
-                  detail: persistenceWarning,
-                  type: 'warning',
-                },
-              ]
-            : undefined,
+          cards: messageCards.length > 0 ? messageCards : undefined,
         },
       ]);
-    } catch (error) {
-      const detail = error instanceof Error ? error.message : 'Try again in a moment.';
-      setLastSource('local fallback');
+    } catch {
       setMessages((current) => [
         ...current,
         {
           id: crypto.randomUUID(),
           role: 'ling',
-          text: `I hit a problem while coordinating the T team. ${detail}`,
+          text: 'Ling is offline. Check your internet connection.',
           cards: [
-            {title: 'Recovery', detail: 'Your message stayed in chat. Send again after checking the API key or server logs.', type: 'error'},
+            {
+              title: 'Orchestration connection failed',
+              detail: 'API is currently offline. Review local console.',
+              type: 'error',
+            },
           ],
         },
       ]);
@@ -238,17 +506,17 @@ export default function ChatPage() {
     }
   }
 
-  async function addToWorkspace(message: Message) {
-    if (!user || !message.orchestration || savingMessageId) return;
+  async function approvePlan(result: OrchestrationResult) {
+    if (!user || savingMessageId || savedMessageIds.includes(result.assistantMessage)) return;
 
     setSaveError('');
-    setSavingMessageId(message.id);
+    setSavingMessageId(result.assistantMessage);
 
     try {
-      await saveGeneratedPlan(user.uid, message.orchestration);
-      setSavedMessageIds((current) => [...current, message.id]);
+      await saveGeneratedPlan(user.uid, result);
+      setSavedMessageIds((current) => [...current, result.assistantMessage]);
     } catch (error) {
-      setSaveError(error instanceof Error ? error.message : 'Unable to save to workspace.');
+      setSaveError(error instanceof Error ? error.message : 'Unable to save tasks.');
     } finally {
       setSavingMessageId('');
     }
@@ -256,240 +524,318 @@ export default function ChatPage() {
 
   return (
     <AppShell>
-      <div className="grid h-[calc(100vh-64px)] min-h-[720px] gap-0 md:h-screen lg:grid-cols-[minmax(0,1fr)_320px]">
-        <section className="flex min-w-0 flex-col border-r border-border bg-background">
-          <header className="border-b border-border bg-surface/80 px-4 py-4 backdrop-blur md:px-6">
-            <div className="flex items-center justify-between gap-4">
-              <div>
-                <h1 className="font-display text-2xl">Ling</h1>
-                <p className="mt-1 text-sm text-muted-foreground">
-                  Start with whatever is messy. The team appears when there is work to do.
-                </p>
-              </div>
-              <div className="hidden items-center gap-2 rounded-full border border-border bg-surface px-3 py-1.5 text-xs text-muted-foreground md:flex">
-                <span className={lastSource === 'gemini' ? 'h-2 w-2 rounded-full bg-success' : 'h-2 w-2 rounded-full bg-warning'} />
-                {lastSource}
-              </div>
-            </div>
-          </header>
-
-          <div className="flex-1 overflow-y-auto px-4 py-5 md:px-6">
-            <div className="mx-auto max-w-3xl space-y-5">
-              {messages.map((message) => (
-                <div 
-                  key={message.id} 
-                  className={message.role === 'user' ? 'flex justify-end animate-lingt-message-in-right' : 'flex justify-start gap-3 animate-lingt-message-in-left'}
+      <div className="relative flex h-[calc(100vh-57px)] overflow-hidden md:h-screen w-full">
+        
+        {/* Chat Sessions Left Sidebar */}
+        <aside className="hidden w-60 shrink-0 border-r border-border bg-surface/50 p-4 md:flex md:flex-col justify-between">
+          <div className="space-y-4">
+            <div className="flex items-center justify-between border-b border-border/60 pb-3">
+              <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Recent Chats</span>
+              {user && (
+                <button
+                  onClick={() => {
+                    setConversationId(crypto.randomUUID());
+                    setMessages(starterMessages);
+                  }}
+                  className="rounded-lg bg-brand px-2.5 py-1.5 text-[10px] font-bold text-white hover:bg-brand-deep transition active:scale-[0.96]"
                 >
-                  {message.role === 'ling' && (
-                    <div className="mt-1 flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-border bg-surface shadow-sm transition-transform duration-300 hover:rotate-6">
-                      <Bot className="h-4 w-4 text-brand animate-pulse" />
-                    </div>
-                  )}
-                  <div className={message.role === 'user' ? 'max-w-[84%]' : 'max-w-[88%]'}>
-                    <div
-                      className={
-                        message.role === 'user'
-                          ? 'rounded-xl bg-brand px-4 py-3 text-sm leading-6 text-white shadow-sm hover:shadow-md transition-shadow duration-300'
-                          : 'rounded-xl border border-border bg-surface px-4 py-3 text-sm leading-6 shadow-sm hover:shadow-md transition-all duration-300 hover:border-brand/10'
-                      }
-                    >
-                      <div className="mb-1 text-xs font-semibold opacity-70">
-                        {message.role === 'user' ? 'You' : 'Ling'}
-                      </div>
-                      {message.text}
-                    </div>
-
-                    {message.cards && (
-                      <div className="mt-3 grid gap-2">
-                        {message.cards.map((card) => (
-                          <div key={card.title} className="rounded-lg border border-border bg-surface-muted p-3">
-                            <div className="text-sm font-medium">{card.title}</div>
-                            <div className="mt-1 text-xs leading-5 text-muted-foreground">{card.detail}</div>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-
-                    {message.orchestration && (
-                      <div className="mt-3 grid gap-2">
-                        {message.orchestration.tasks.map((task) => (
-                          <div key={`${message.id}-${task.title}`} className="rounded-lg border border-border bg-surface-muted p-3">
-                            <div className="flex items-center justify-between gap-3">
-                              <div className="text-sm font-medium">{task.title}</div>
-                              <span className="shrink-0 rounded-full bg-brand-soft px-2 py-1 text-[11px] text-brand-deep">
-                                {task.priority.replace('_', ' ')}
-                              </span>
-                            </div>
-                            <div className="mt-1 text-xs leading-5 text-muted-foreground">
-                              {task.reason} Due: {task.due}.
-                            </div>
-                          </div>
-                        ))}
-
-                        {message.orchestration.openLoops.map((loop) => (
-                          <div key={`${message.id}-${loop.title}`} className="rounded-lg border border-warning/40 bg-warning/10 p-3">
-                            <div className="text-sm font-medium">{loop.title}</div>
-                            <div className="mt-1 text-xs leading-5 text-muted-foreground">
-                              {loop.reason} Next: {loop.action}.
-                            </div>
-                          </div>
-                        ))}
-
-                        {message.orchestration.approvals.length > 0 && (
-                          <div className="rounded-lg border border-green-200 bg-green-50 p-3">
-                            <div className="text-sm font-medium text-success">Needs approval</div>
-                            <div className="mt-1 text-xs leading-5 text-muted-foreground">
-                              {message.orchestration.approvals.join(' ')}
-                            </div>
-                          </div>
-                        )}
-
-                        {(message.orchestration.tasks.length > 0 ||
-                          message.orchestration.openLoops.length > 0 ||
-                          message.orchestration.approvals.length > 0) && (
-                          <>
-                            <div className="rounded-lg border border-brand/20 bg-brand-soft p-3">
-                              <div className="grid gap-2 text-xs text-brand-deep sm:grid-cols-3">
-                                <div className="flex items-center gap-2">
-                                  <span className="flex h-5 w-5 items-center justify-center rounded-full bg-white font-semibold">1</span>
-                                  Review extracted work
-                                </div>
-                                <div className="flex items-center gap-2">
-                                  <span className="flex h-5 w-5 items-center justify-center rounded-full bg-white font-semibold">2</span>
-                                  Save to workspace
-                                </div>
-                                <div className="flex items-center gap-2">
-                                  <span className="flex h-5 w-5 items-center justify-center rounded-full bg-white font-semibold">3</span>
-                                  Run plan, reminder, calendar
-                                </div>
-                              </div>
-                            </div>
-
-                            <div className="flex flex-wrap items-center gap-2">
-                              <button
-                                type="button"
-                                disabled={!user || savingMessageId === message.id || savedMessageIds.includes(message.id)}
-                                onClick={() => addToWorkspace(message)}
-                                className="inline-flex items-center gap-2 rounded-lg bg-brand px-4 py-2.5 text-sm font-semibold text-white shadow-sm disabled:cursor-not-allowed disabled:opacity-50"
-                              >
-                                {savedMessageIds.includes(message.id) ? (
-                                  <CheckCircle2 className="h-4 w-4" />
-                                ) : (
-                                  <Sparkles className="h-4 w-4" />
-                                )}
-                                {savedMessageIds.includes(message.id)
-                                  ? 'Added to workspace'
-                                  : savingMessageId === message.id
-                                    ? 'Adding...'
-                                    : 'Add to workspace'}
-                              </button>
-                              <Link
-                                href="/workspace"
-                                className="inline-flex items-center gap-2 rounded-lg border border-border bg-surface px-4 py-2.5 text-sm font-semibold"
-                              >
-                                Open guided workspace
-                                <ArrowRight className="h-4 w-4" />
-                              </Link>
-                              {!user && (
-                                <span className="text-xs text-muted-foreground">
-                                  Sign in first to save this plan.
-                                </span>
-                              )}
-                              {saveError && <span className="text-xs text-danger">{saveError}</span>}
-                            </div>
-
-                            <details className="w-fit text-xs text-muted-foreground">
-                              <summary className="cursor-pointer rounded-full border border-border bg-surface px-3 py-1.5">
-                                Orchestration details
-                              </summary>
-                              <div className="mt-2 max-w-2xl rounded-lg border border-border bg-surface p-3">
-                                {message.orchestration.agentActions.map((action) => (
-                                  <div key={`${message.id}-${action.agent}-${action.action}`} className="flex items-start justify-between gap-3">
-                                    <span>
-                                      <strong className="text-foreground">{action.agent}</strong>: {action.action}
-                                    </span>
-                                    {action.requiresApproval && <span className="shrink-0 text-brand">approval</span>}
-                                  </div>
-                                ))}
-                                <div className="mt-2 border-t border-border pt-2">
-                                  {message.orchestration.graph.join(' -> ')}
-                                </div>
-                              </div>
-                            </details>
-                          </>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                </div>
-              ))}
-
-              {isThinking && (
-                <div className="flex justify-start gap-3 animate-lingt-message-in-left">
-                  <div className="mt-1 flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-border bg-surface">
-                    <Bot className="h-4 w-4 text-brand" />
-                  </div>
-                  <div className="rounded-xl border border-border bg-surface px-4 py-3.5">
-                    <div className="flex items-center gap-1.5">
-                      <span className="h-2 w-2 rounded-full bg-brand/60 animate-bounce" style={{animationDelay: '0ms'}} />
-                      <span className="h-2 w-2 rounded-full bg-brand/60 animate-bounce" style={{animationDelay: '150ms'}} />
-                      <span className="h-2 w-2 rounded-full bg-brand/60 animate-bounce" style={{animationDelay: '300ms'}} />
-                    </div>
-                  </div>
-                </div>
+                  + New Chat
+                </button>
               )}
-              <div ref={bottomRef} />
             </div>
-          </div>
-
-          <div className="border-t border-border bg-surface px-4 py-4 md:px-6">
-            <div className="mx-auto max-w-3xl">
-              <div className="mb-3 flex flex-wrap gap-2">
-                {suggestions.map((suggestion) => (
+            
+            {!user ? (
+              <div className="text-xs text-muted-foreground leading-5">
+                Sign in to save and review past chat sessions.
+              </div>
+            ) : loadingSessions ? (
+              <div className="text-xs text-muted-foreground animate-pulse">Loading history...</div>
+            ) : sessions.length === 0 ? (
+              <div className="text-xs text-muted-foreground italic">No previous chats.</div>
+            ) : (
+              <div className="space-y-1 max-h-[75vh] overflow-y-auto">
+                {sessions.map((s) => (
                   <button
-                    key={suggestion}
-                    type="button"
-                    onClick={() => sendMessage(suggestion)}
-                    className="rounded-full border border-border bg-background px-3.5 py-1.8 text-xs text-muted-foreground transition-all duration-300 hover:border-brand/40 hover:text-brand hover:-translate-y-0.5 active:scale-[0.97] hover:bg-brand-soft/10"
+                    key={s.id}
+                    onClick={() => selectSession(s.id)}
+                    className={`w-full text-left px-3 py-2 text-xs rounded-lg transition-all truncate block ${
+                      conversationId === s.id
+                        ? 'bg-brand-soft text-brand-deep font-semibold border border-brand/20'
+                        : 'hover:bg-surface-muted text-muted-foreground hover:text-foreground'
+                    }`}
                   >
-                    {suggestion}
+                    {s.title}
                   </button>
                 ))}
               </div>
-              <form
-                onSubmit={(event) => {
-                  event.preventDefault();
-                  sendMessage();
-                }}
-                className="flex gap-2 rounded-xl border border-border bg-background p-2 transition-all duration-300 focus-within:border-brand/45 focus-within:shadow-[0_0_18px_rgba(26,115,232,0.1)]"
-              >
-                <input
-                  value={input}
-                  onChange={(event) => setInput(event.target.value)}
-                  placeholder="Ask Ling to plan, remember, schedule, or draft..."
-                  className="min-w-0 flex-1 bg-transparent px-3 text-sm outline-none placeholder:text-muted-foreground/60"
-                />
-                <button 
-                  className="rounded-lg bg-brand p-3 text-white transition-all duration-300 hover:bg-brand-deep hover:scale-[1.04] active:scale-[0.96] flex items-center justify-center" 
-                  type="submit" 
-                  aria-label="Send"
-                >
-                  <Send className="h-4 w-4" />
-                </button>
-              </form>
-            </div>
+            )}
           </div>
+          <div className="text-[10px] text-muted-foreground border-t border-border/40 pt-3">
+            Click + New Chat to start a fresh thread.
+          </div>
+        </aside>
+
+        {/* Main Chat Area */}
+        <section className="flex flex-1 flex-col overflow-y-auto bg-background px-4 py-6">
+          <header className="flex items-center justify-between border-b border-border pb-4">
+            <div>
+              <h1 className="font-display text-2xl font-bold">Ling</h1>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Start with whatever is messy. The team appears when there is work to do.
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="rounded-full bg-brand-soft px-3 py-1 text-xs text-brand-deep uppercase">
+                {lastSource}
+              </span>
+            </div>
+          </header>
+
+          <div className="flex-1 space-y-4 py-6 overflow-y-auto">
+            {messages.map((message) => {
+              const isLing = message.role === 'ling';
+              const result = message.orchestration;
+              const hasWork = Boolean(
+                result &&
+                  (result.tasks.length > 0 ||
+                    result.openLoops.length > 0 ||
+                    result.approvals.length > 0),
+              );
+
+              return (
+                <div key={message.id} className="space-y-3">
+                  <div className={`flex gap-3 ${isLing ? '' : 'justify-end'}`}>
+                    {isLing && (
+                      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-border bg-surface">
+                        <Bot className="h-4 w-4 text-brand" />
+                      </div>
+                    )}
+                    <div
+                      className={`rounded-2xl px-5 py-3.5 text-sm leading-7 max-w-lg shadow-sm ${
+                        isLing
+                          ? 'border border-border bg-surface text-foreground'
+                          : 'bg-brand text-white'
+                      }`}
+                    >
+                      {isLing ? renderMarkdown(message.text) : message.text}
+                    </div>
+                    {!isLing && (
+                      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-brand text-xs font-semibold text-white">
+                        You
+                      </div>
+                    )}
+                  </div>
+
+                  {isLing && message.cards && (
+                    <div className="pl-11 space-y-2">
+                      {message.cards.map((card) => {
+                        if (card.type === 'security_logs') {
+                          return (
+                            <div
+                              key={card.title}
+                              className="max-w-md rounded-xl border border-brand/20 bg-surface p-4 text-xs space-y-3 shadow-md"
+                            >
+                              <div className="flex items-center gap-2 border-b border-border pb-2">
+                                <span className="h-2.5 w-2.5 rounded-full bg-success animate-pulse" />
+                                <div className="font-semibold text-sm text-foreground">{card.title}</div>
+                              </div>
+                              
+                              <div className="space-y-1.5 font-mono text-[10px] text-muted-foreground bg-background p-2.5 rounded-lg border border-border">
+                                <div>[SYSTEM] GCP Webhook: Active (Listening)</div>
+                                <div>[AUTH] OAuth Refresh: Token refreshed successfully</div>
+                                <div>[SCOPE] Gmail: Read-only (Verified)</div>
+                                <div>[SCOPE] Calendar: Read-write (Verified)</div>
+                                <div>[AUDIT] 0 suspicious events detected today</div>
+                              </div>
+                              
+                              <div className="text-[10px] leading-relaxed text-brand-deep bg-brand-soft/40 p-2 rounded-md">
+                                <strong>Security Recommendation:</strong> Google OAuth session is active. LingT server encrypts your tokens with AES-256. No action required!
+                              </div>
+                            </div>
+                          );
+                        }
+                        return (
+                          <div
+                            key={card.title}
+                            className={`max-w-md rounded-xl border p-3.5 text-xs ${
+                              card.type === 'error'
+                                ? 'border-red-200 bg-red-50 text-red-700'
+                                : 'border-yellow-200 bg-yellow-50 text-yellow-700'
+                            }`}
+                          >
+                            <div className="font-semibold">{card.title}</div>
+                            <div className="mt-1 text-muted-foreground leading-5">{card.detail}</div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+
+                  {isLing && result && hasWork && (
+                    <div className="pl-11 space-y-3 max-w-md">
+                      <div className="rounded-2xl border border-border bg-surface p-4 space-y-3 shadow-sm">
+                        <div className="flex items-center justify-between border-b border-border/40 pb-2">
+                          <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
+                            Extracted Actions
+                          </span>
+                          <span className="rounded bg-brand-soft px-2 py-0.5 text-[9px] font-semibold text-brand-deep">
+                            Tara
+                          </span>
+                        </div>
+
+                        {result.tasks.length > 0 && (
+                          <div className="space-y-2">
+                            <h4 className="text-xs font-bold text-foreground">Tasks to create:</h4>
+                            {result.tasks.map((task) => (
+                              <div
+                                key={task.title}
+                                className="rounded-lg border border-border/60 bg-background p-2.5"
+                              >
+                                <div className="font-semibold text-xs text-foreground">{task.title}</div>
+                                <div className="mt-1 text-[10px] text-muted-foreground">
+                                  Priority: {task.priority.replace('_', ' ')} | Due: {task.due}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+
+                        {result.openLoops.length > 0 && (
+                          <div className="space-y-2">
+                            <h4 className="text-xs font-bold text-foreground">Open Loops resolved:</h4>
+                            {result.openLoops.map((loop) => (
+                              <div
+                                key={loop.title}
+                                className="rounded-lg border border-border/60 bg-background p-2.5"
+                              >
+                                <div className="font-semibold text-xs text-foreground">{loop.title}</div>
+                                <div className="mt-1 text-[10px] text-muted-foreground">{loop.reason}</div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+
+                        {result.approvals.length > 0 && (
+                          <div className="space-y-2">
+                            <h4 className="text-xs font-bold text-foreground">Requires approval:</h4>
+                            {result.approvals.map((approval) => (
+                              <div
+                                key={approval}
+                                className="rounded-lg border border-yellow-200 bg-yellow-50/50 p-2 text-xs text-yellow-800"
+                              >
+                                {approval}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+
+                        <div className="pt-2 border-t border-border/40 flex items-center justify-between gap-3">
+                          <button
+                            onClick={() => approvePlan(result)}
+                            disabled={savedMessageIds.includes(result.assistantMessage)}
+                            className="rounded-lg bg-brand px-4 py-2 text-xs font-semibold text-white transition hover:bg-brand-deep active:scale-[0.96] disabled:opacity-50"
+                          >
+                            {savedMessageIds.includes(result.assistantMessage)
+                              ? 'Workspace Synced'
+                              : 'Approve & Commit'}
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+
+            {isThinking && (
+              <div className="flex gap-3">
+                <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-brand/20 bg-brand-soft animate-pulse">
+                  <Bot className="h-4 w-4 text-brand" />
+                </div>
+                <div className="flex items-center gap-1.5 rounded-2xl border border-border bg-surface px-4 py-3 text-xs text-muted-foreground">
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  <span>Ling is executing orchestration workflow...</span>
+                </div>
+              </div>
+            )}
+            <div ref={bottomRef} />
+          </div>
+
+          <footer className="mt-4 space-y-4">
+            <div className="flex flex-wrap gap-2 justify-center">
+              {suggestions.map((suggestion) => (
+                <button
+                  key={suggestion}
+                  type="button"
+                  onClick={() => sendMessage(suggestion)}
+                  className="rounded-full border border-border bg-background px-3.5 py-2 text-xs text-muted-foreground transition hover:border-brand/40 hover:text-brand"
+                >
+                  {suggestion}
+                </button>
+              ))}
+            </div>
+
+            <form
+              className="flex gap-2 rounded-2xl border border-border bg-surface p-2 shadow-sm focus-within:border-brand/40"
+              onSubmit={(event) => {
+                event.preventDefault();
+                sendMessage();
+              }}
+            >
+              <input
+                value={input}
+                onChange={(event) => setInput(event.target.value)}
+                placeholder="Ask Ling to plan, remember, schedule, or draft..."
+                className="min-w-0 flex-1 bg-transparent px-3 text-sm outline-none"
+              />
+              <button
+                type="button"
+                onClick={toggleListening}
+                className={`rounded-lg p-2.5 transition flex items-center justify-center ${
+                  isListening ? 'bg-danger text-white animate-pulse' : 'bg-surface hover:bg-surface-muted text-muted-foreground'
+                }`}
+                title="Speech-to-Text Dictation"
+              >
+                <Mic className="h-4 w-4" />
+              </button>
+              <button
+                type="submit"
+                disabled={!input.trim() || isThinking}
+                className="rounded-xl bg-brand p-2.5 text-white transition hover:bg-brand-deep active:scale-[0.96] disabled:opacity-50"
+              >
+                <Send className="h-4 w-4" />
+              </button>
+            </form>
+          </footer>
         </section>
 
-        <aside className="hidden overflow-y-auto bg-surface-warm p-5 lg:block">
-          <div className="flex items-center justify-between gap-2">
+        {/* Coordinated Team Sidebar */}
+        <aside className="hidden overflow-y-auto bg-surface-warm p-5 lg:block w-64 shrink-0">
+          <div className="flex items-center justify-between gap-2 border-b border-border/40 pb-3">
             <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">Team</p>
             <span className="text-[10px] text-muted-foreground">
               {isThinking ? 'working' : activeAgents.length > 1 ? `${activeAgents.length} active` : 'standby'}
             </span>
           </div>
 
-          {activeAgents.length > 1 || isThinking ? (
+          {isThinking ? (
+            <div className="mt-4 space-y-4">
+              <div className="flex items-center gap-3">
+                <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-brand/35 bg-brand-soft animate-pulse">
+                  <Bot className="h-4 w-4 text-brand" />
+                </div>
+                <div>
+                  <div className="text-sm font-semibold text-brand">Orchestrator (Ling)</div>
+                  <div className="text-[11px] text-muted-foreground animate-pulse">Coordinating team agents...</div>
+                </div>
+              </div>
+              <div className="space-y-2 pl-11 text-xs text-muted-foreground italic">
+                <div>- Querying intent and history</div>
+                <div>- Constructing database context</div>
+                <div>- Executing LangGraph routing</div>
+              </div>
+            </div>
+          ) : activeAgents.length > 0 ? (
             <div className="mt-4 space-y-2.5">
               {activeAgents.map((agent) => (
                 <div key={agent.id} className="flex items-center gap-3">

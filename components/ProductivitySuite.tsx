@@ -18,7 +18,7 @@ import {
   Target,
   Zap,
 } from 'lucide-react';
-import {useState, useMemo, useCallback} from 'react';
+import {useState, useMemo, useEffect, useRef, useCallback} from 'react';
 import type {User} from 'firebase/auth';
 import type {
   CalendarSuggestion,
@@ -41,7 +41,7 @@ import type {
   MeetingActionItem,
   OpenLoopStatus,
 } from '@/lib/lingt-data';
-import {statusLabel, calendarBlocks} from '@/lib/lingt-data';
+import {statusLabel} from '@/lib/lingt-data';
 import {firebaseApp, getFirebaseVapidKey} from '@/lib/firebase/client';
 import {
   saveDraftRecord,
@@ -126,6 +126,17 @@ export default function ProductivitySuite({
   const [isSearchingMemory, setIsSearchingMemory] = useState(false);
   const [memoryError, setMemoryError] = useState('');
 
+  // Google Integration Status State
+  const [isGoogleConnected, setIsGoogleConnected] = useState(false);
+
+  // Dynamic Calendar listing state
+  const [calendarEvents, setCalendarEvents] = useState<Array<{id: string; time: string; title: string; status: string}>>([]);
+  const [loadingCalendar, setLoadingCalendar] = useState(false);
+
+  // Speech-to-Text state for Meeting Capture
+  const [isListeningMeeting, setIsListeningMeeting] = useState(false);
+  const meetingRecognitionRef = useRef<any>(null);
+
   const workspaceTasks = useMemo(() => tasks.map(toWorkspaceTask), [tasks]);
   const topTask = workspaceTasks[0];
 
@@ -136,6 +147,96 @@ export default function ProductivitySuite({
       ...(token ? {Authorization: `Bearer ${token}`} : {}),
     };
   }
+
+  // Effect to check Google Integration status
+  useEffect(() => {
+    async function checkGoogleStatus() {
+      if (!user) {
+        setIsGoogleConnected(false);
+        return;
+      }
+      try {
+        const response = await fetch(`/api/integrations/google/status?userId=${encodeURIComponent(user.uid)}`);
+        if (response.ok) {
+          const data = await response.json();
+          setIsGoogleConnected(Boolean(data.connected));
+        }
+      } catch (err) {
+        console.error('Failed to check Google integration status', err);
+      }
+    }
+    checkGoogleStatus();
+  }, [user]);
+
+  const fetchCalendarEvents = useCallback(async () => {
+    if (!user || !isGoogleConnected) return;
+    setLoadingCalendar(true);
+    try {
+      const response = await fetch('/api/calendar/list', {
+        method: 'POST',
+        headers: await authHeaders(),
+      });
+      if (response.ok) {
+        const data = await response.json();
+        setCalendarEvents(data);
+      }
+    } catch (err) {
+      console.error('Failed to load calendar events', err);
+    } finally {
+      setLoadingCalendar(false);
+    }
+  }, [user, isGoogleConnected]);
+
+  useEffect(() => {
+    if (user && isGoogleConnected) {
+      fetchCalendarEvents();
+    }
+  }, [user, isGoogleConnected, fetchCalendarEvents]);
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+      if (SpeechRecognition) {
+        const recognition = new SpeechRecognition();
+        recognition.continuous = true;
+        recognition.interimResults = false;
+        recognition.lang = 'en-US';
+
+        recognition.onstart = () => {
+          setIsListeningMeeting(true);
+        };
+
+        recognition.onresult = (event: any) => {
+          const transcript = event.results[event.results.length - 1][0].transcript;
+          setMeetingNotes((prev) => (prev ? prev + '\n' + transcript : transcript));
+        };
+
+        recognition.onerror = (event: any) => {
+          console.error('Speech recognition error', event.error);
+          setIsListeningMeeting(false);
+        };
+
+        recognition.onend = () => {
+          setIsListeningMeeting(false);
+        };
+
+        meetingRecognitionRef.current = recognition;
+      }
+    }
+  }, []);
+
+  const toggleListeningMeeting = () => {
+    if (!meetingRecognitionRef.current) {
+      alert('Speech recognition is not supported in this browser. Try Chrome or Edge.');
+      return;
+    }
+
+    if (isListeningMeeting) {
+      meetingRecognitionRef.current.stop();
+    } else {
+      meetingRecognitionRef.current.start();
+    }
+  };
 
   async function callApi<T>(id: string, url: string, body: Record<string, unknown>) {
     setError('');
@@ -193,6 +294,10 @@ export default function ProductivitySuite({
   }
 
   async function suggestCalendar() {
+    if (!isGoogleConnected) {
+      setError('Please connect your Google Calendar in the Integrations tab first.');
+      return;
+    }
     const result = await callApi<CalendarSuggestion & {runtime?: {source: Source}}>('calendar', '/api/calendar/suggest', {
       userId: user?.uid,
       tasks: workspaceTasks,
@@ -202,7 +307,7 @@ export default function ProductivitySuite({
   }
 
   async function commitCalendarBlock(block: CalendarSuggestion['proposedBlocks'][number]) {
-    if (!user) return;
+    if (!user || !isGoogleConnected) return;
     const action: CalendarAction = {
       title: block.title,
       description: block.taskTitle,
@@ -232,6 +337,7 @@ export default function ProductivitySuite({
     }
 
     setSaved('Calendar event created.');
+    fetchCalendarEvents();
   }
 
   async function escalateReminder() {
@@ -489,8 +595,8 @@ export default function ProductivitySuite({
     },
     {
       label: 'Google Status',
-      value: user ? 'Connected' : 'Offline',
-      detail: user ? 'Autopilot active' : 'Sign in to save',
+      value: user && isGoogleConnected ? 'Connected' : 'Offline',
+      detail: user && isGoogleConnected ? 'Autopilot active' : 'Connect Google account',
     },
   ];
 
@@ -613,8 +719,9 @@ export default function ProductivitySuite({
                     </div>
                     <button
                       type="button"
+                      disabled={tasks.length === 0 || busy === 'plan'}
                       onClick={generatePlan}
-                      className="rounded-lg bg-brand-soft px-3.5 py-2 text-xs font-semibold text-brand-deep transition-all duration-200 hover:bg-brand/15 active:scale-[0.97]"
+                      className="rounded-lg bg-brand-soft px-3.5 py-2 text-xs font-semibold text-brand-deep transition-all duration-200 hover:bg-brand/15 active:scale-[0.97] disabled:opacity-40"
                     >
                       {busy === 'plan' ? 'Generating...' : 'Generate'}
                     </button>
@@ -655,16 +762,30 @@ export default function ProductivitySuite({
                       </h3>
                       <p className="mt-1 text-xs text-muted-foreground">Smart blocks to protect time in your calendar.</p>
                     </div>
-                    <button
-                      type="button"
-                      onClick={suggestCalendar}
-                      className="rounded-lg bg-brand-soft px-3.5 py-2 text-xs font-semibold text-brand-deep transition-all duration-200 hover:bg-brand/15 active:scale-[0.97]"
-                    >
-                      {busy === 'calendar' ? 'Suggesting...' : 'Suggest'}
-                    </button>
+                    {isGoogleConnected && (
+                      <button
+                        type="button"
+                        onClick={suggestCalendar}
+                        className="rounded-lg bg-brand-soft px-3.5 py-2 text-xs font-semibold text-brand-deep transition-all duration-200 hover:bg-brand/15 active:scale-[0.97]"
+                      >
+                        {busy === 'calendar' ? 'Suggesting...' : 'Suggest'}
+                      </button>
+                    )}
                   </div>
 
-                  {calendar ? (
+                  {!isGoogleConnected ? (
+                    <div className="mt-4 rounded-xl border border-[#4285f4]/20 bg-[#4285f4]/5 p-4 text-center space-y-2.5">
+                      <p className="text-xs text-muted-foreground leading-5">
+                        Connect your Google Calendar in the Integrations tab to let Cal automatically check for conflicts and suggest protected study slots.
+                      </p>
+                      <a
+                        href="/integrations"
+                        className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-[#4285f4] px-4 py-2 text-xs font-semibold text-white hover:bg-[#357ae8] transition active:scale-[0.97]"
+                      >
+                        Connect Google Calendar
+                      </a>
+                    </div>
+                  ) : calendar ? (
                     <div className="mt-4 space-y-3">
                       {calendar.proposedBlocks.length === 0 && (
                         <p className="text-sm text-muted-foreground italic">No suggested blocks found for current tasks.</p>
@@ -688,7 +809,7 @@ export default function ProductivitySuite({
                       ))}
                     </div>
                   ) : (
-                    <p className="mt-4 text-sm text-muted-foreground italic">Connect your Google account to get exact time suggestions based on your calendar.</p>
+                    <p className="mt-4 text-sm text-muted-foreground italic">Click suggest to generate smart calendar block proposals for your active tasks.</p>
                   )}
                 </div>
               </div>
@@ -949,14 +1070,16 @@ export default function ProductivitySuite({
                       {meetingResult.runtime.source}
                     </span>
                   )}
-                  <button
-                    type="button"
-                    disabled={!user}
-                    onClick={importCalendarMeetings}
-                    className="rounded-lg border border-border bg-background px-3 py-1.5 text-xs font-semibold transition hover:border-brand/40 active:scale-[0.97] disabled:opacity-50"
-                  >
-                    Import Calendar Notes
-                  </button>
+                  {isGoogleConnected && (
+                    <button
+                      type="button"
+                      disabled={!user}
+                      onClick={importCalendarMeetings}
+                      className="rounded-lg border border-border bg-background px-3 py-1.5 text-xs font-semibold transition hover:border-brand/40 active:scale-[0.97] disabled:opacity-50"
+                    >
+                      Import Calendar Notes
+                    </button>
+                  )}
                 </div>
               </div>
 
@@ -968,9 +1091,21 @@ export default function ProductivitySuite({
                   placeholder="Paste raw transcript, markdown, or summary bullet points here..."
                 />
                 <div className="mt-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 border-t border-border/40 pt-3">
-                  <p className="text-[11px] text-muted-foreground">
-                    Ling only extracts actions. Items stay drafts until approved.
-                  </p>
+                  <div className="flex items-center gap-2">
+                    <p className="text-[11px] text-muted-foreground">
+                      Ling only extracts actions. Items stay drafts until approved.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={toggleListeningMeeting}
+                      className={`rounded-lg p-2 transition-all duration-300 flex items-center justify-center ${
+                        isListeningMeeting ? 'bg-danger text-white animate-pulse' : 'bg-surface hover:bg-surface-muted text-muted-foreground'
+                      }`}
+                      title={isListeningMeeting ? 'Stop listening' : 'Start listening'}
+                    >
+                      <Mic className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
                   <button
                     type="button"
                     disabled={!meetingNotes.trim() || isExtractingMeeting}
@@ -1283,7 +1418,7 @@ export default function ProductivitySuite({
                 {habit && (
                   <div className="rounded-xl border border-border bg-background p-3.5 space-y-2">
                     <div className="font-semibold text-xs text-foreground">{habit.title}</div>
-                    <div className="text-[10px] text-muted-foreground">{habit.cadence} | Target: {habit.target}</div>
+                    <div className="text-[10px] text-muted-foreground">{habit.reason || habit.cadence} | Target: {habit.target}</div>
                     <button
                       type="button"
                       disabled={!user}
@@ -1347,20 +1482,27 @@ export default function ProductivitySuite({
                 </div>
 
                 <div className="space-y-2.5">
-                  {calendarBlocks.length === 0 && (
+                  {loadingCalendar && <div className="text-xs text-muted-foreground animate-pulse">Loading events...</div>}
+                  
+                  {!isGoogleConnected ? (
                     <div className="rounded-xl border border-dashed border-border bg-background/50 p-4 text-xs text-center text-muted-foreground">
-                      No calendar blocks committed yet. Approve suggestions on the Dashboard tab.
+                      Google account not connected. Go to the <a href="/integrations" className="text-brand underline font-medium">Integrations</a> tab to connect Google Calendar.
                     </div>
-                  )}
-                  {calendarBlocks.map((block) => (
-                    <div key={block.id} className="rounded-lg bg-background p-3 flex justify-between items-center text-xs border border-border">
-                      <div>
-                        <div className="font-semibold">{block.title}</div>
-                        <div className="text-muted-foreground mt-0.5">{block.time}</div>
+                  ) : calendarEvents.length === 0 && !loadingCalendar ? (
+                    <div className="rounded-xl border border-dashed border-border bg-background/50 p-4 text-xs text-center text-muted-foreground">
+                      No calendar blocks scheduled. Approve proposals on the Dashboard to add events.
+                    </div>
+                  ) : (
+                    calendarEvents.map((block) => (
+                      <div key={block.id} className="rounded-lg bg-background p-3 flex justify-between items-center text-xs border border-border">
+                        <div>
+                          <div className="font-semibold">{block.title}</div>
+                          <div className="text-muted-foreground mt-0.5">{block.time}</div>
+                        </div>
+                        <span className="rounded-full bg-success-soft px-2 py-0.5 text-[9px] font-semibold text-success uppercase">{block.status}</span>
                       </div>
-                      <span className="rounded-full bg-success-soft px-2 py-0.5 text-[9px] font-semibold text-success uppercase">{block.status}</span>
-                    </div>
-                  ))}
+                    ))
+                  )}
                 </div>
               </div>
 

@@ -192,6 +192,8 @@ export type DraftGeneration = z.infer<typeof draftGenerationSchema>;
 
 export interface OrchestrationRequest {
   message: string;
+  history?: Array<{role: 'user' | 'ling', text: string}>;
+  workspaceContext?: string;
   timezone?: string;
 }
 

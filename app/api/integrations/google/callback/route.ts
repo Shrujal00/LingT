@@ -28,8 +28,22 @@ export async function GET(request: Request) {
       throw new Error('Google did not return usable tokens.');
     }
 
+    let email = '';
+    try {
+      const profileRes = await fetch('https://www.googleapis.com/oauth2/v2/userinfo', {
+        headers: { Authorization: `Bearer ${tokens.access_token}` },
+      });
+      if (profileRes.ok) {
+        const profile = await profileRes.json();
+        email = typeof profile.email === 'string' ? profile.email.toLowerCase().trim() : '';
+      }
+    } catch (profileErr) {
+      console.error('Failed to fetch user email during OAuth callback', profileErr);
+    }
+
     await setServerDocument('googleIntegrations', userId, {
       userId,
+      email,
       refreshToken: tokens.refresh_token,
       accessToken: tokens.access_token,
       expiresAt: tokens.expires_in ? Date.now() + tokens.expires_in * 1000 : null,

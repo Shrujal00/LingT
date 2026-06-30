@@ -43,6 +43,7 @@ export async function POST(request: Request) {
       conversationId,
       role: 'user',
       content: userMessage,
+      createdAt: new Date().toISOString(),
       source: 'ling-chat',
     }),
     addServerDocument('messages', {
@@ -51,6 +52,7 @@ export async function POST(request: Request) {
       role: 'assistant',
       content: assistantMessage,
       structuredOutput: structuredOutput || null,
+      createdAt: new Date().toISOString(),
       source: 'ling-chat',
     }),
   ]);

@@ -1,6 +1,6 @@
 import 'server-only';
 
-import {HumanMessage, SystemMessage} from '@langchain/core/messages';
+import {AIMessage, HumanMessage, SystemMessage} from '@langchain/core/messages';
 import {ChatGoogle} from '@langchain/google/node';
 import {
   emailAutomationSchema,
@@ -41,27 +41,44 @@ function createGeminiModel() {
   });
 }
 
-export async function extractWithGemini(message: string): Promise<TaskExtraction | null> {
+export async function extractWithGemini(
+  message: string,
+  history: Array<{role: 'user' | 'ling'; text: string}> = [],
+  workspaceContext = '',
+): Promise<TaskExtraction | null> {
   const model = createGeminiModel();
   if (!model) return null;
 
   try {
     const structuredModel = model.withStructuredOutput(taskExtractionSchema);
 
-    return structuredModel.invoke([
+    const chatMessages: Array<SystemMessage | HumanMessage | AIMessage> = [
       new SystemMessage(
         [
           'You are Ling, the lead agent in LingT.',
-          'Extract productivity structure from the user message.',
-          'Return concise, action-oriented output.',
-          'For greetings, small talk, thanks, or general capability questions, return no tasks, no openLoops, no approvals, and no specialistAgents.',
-          'Only create tasks or openLoops when the user gives an actual commitment, deadline, meeting notes, routine request, memory lookup, or drafting request.',
+          'Analyze the user message, conversation history, and live workspace context.',
+          'Return a concise, action-oriented response in assistantMessage.',
+          'If the user asks about their tasks, open loops, habits, name, or memory, read the provided workspaceContext data and answer them directly and clearly in assistantMessage (e.g., "Your next task is X" or "You have 3 active tasks"). Include matching agents in specialistAgents (e.g., "planner" for tasks, "memory" for historical lookup).',
+          'Only extract new tasks or openLoops if the user specifies a new commitment, deadline, email draft request, or action item.',
           'Do not invent exact dates. Use due="needs clarification" when vague.',
           'Calendar writes, push reminders, and external sending require approval.',
-        ].join(' '),
+          '',
+          workspaceContext,
+        ].join('\n'),
       ),
-      new HumanMessage(message),
-    ]);
+    ];
+
+    for (const msg of history) {
+      if (msg.role === 'user') {
+        chatMessages.push(new HumanMessage(msg.text));
+      } else {
+        chatMessages.push(new AIMessage(msg.text));
+      }
+    }
+
+    chatMessages.push(new HumanMessage(message));
+
+    return structuredModel.invoke(chatMessages);
   } catch {
     return null;
   }
