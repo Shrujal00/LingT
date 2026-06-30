@@ -1,18 +1,24 @@
 'use client';
 
 import {
+  AlertCircle,
   Bell,
   CalendarClock,
   CheckCircle2,
   ClipboardList,
+  LayoutDashboard,
+  ListChecks,
+  ListTodo,
   Loader2,
+  Mic,
   PenLine,
   Repeat,
+  Search,
   Sparkles,
   Target,
   Zap,
 } from 'lucide-react';
-import {useMemo, useState} from 'react';
+import {useState, useMemo, useCallback} from 'react';
 import type {User} from 'firebase/auth';
 import type {
   CalendarSuggestion,
@@ -24,8 +30,18 @@ import type {
   ReminderEscalation,
   RoutineRun,
   WorkspaceTaskInput,
+  MeetingCaptureResult,
+  MemorySearchResult,
 } from '@/lib/orchestration/schemas';
-import type {Habit, OpenLoop, Task} from '@/lib/lingt-data';
+import type {
+  Habit,
+  OpenLoop,
+  Task,
+  Routine,
+  MeetingActionItem,
+  OpenLoopStatus,
+} from '@/lib/lingt-data';
+import {statusLabel, calendarBlocks} from '@/lib/lingt-data';
 import {firebaseApp, getFirebaseVapidKey} from '@/lib/firebase/client';
 import {
   saveDraftRecord,
@@ -34,6 +50,7 @@ import {
   saveHabitSuggestion,
   saveReminderRun,
   saveRoutineRun,
+  saveApprovedMeetingAction,
 } from '@/lib/firebase/workspace';
 
 type Source = 'ready' | 'gemini' | 'local-fallback';
@@ -43,6 +60,13 @@ interface ProductivitySuiteProps {
   tasks: Task[];
   openLoops: OpenLoop[];
   habits: Habit[];
+  routines: Routine[];
+  meetingActionItems: MeetingActionItem[];
+  setOpenLoopStatus: (id: string, status: OpenLoopStatus) => Promise<void>;
+  toggleRoutine: (id: string) => Promise<void>;
+  approveAction: (id: string) => Promise<void>;
+  checkInHabit: (id: string, done: boolean) => Promise<void>;
+  loading: boolean;
 }
 
 function toWorkspaceTask(task: Task): WorkspaceTaskInput {
@@ -56,12 +80,23 @@ function toWorkspaceTask(task: Task): WorkspaceTaskInput {
   };
 }
 
-function runtimeSource(value: unknown): Source {
-  const source = (value as {runtime?: {source?: Source}} | null)?.runtime?.source;
-  return source === 'gemini' || source === 'local-fallback' ? source : 'ready';
-}
+export default function ProductivitySuite({
+  user,
+  tasks,
+  openLoops,
+  habits,
+  routines,
+  meetingActionItems,
+  setOpenLoopStatus,
+  toggleRoutine,
+  approveAction,
+  checkInHabit,
+  loading,
+}: ProductivitySuiteProps) {
+  // Navigation State
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'tasks' | 'studio' | 'habits'>('dashboard');
 
-export default function ProductivitySuite({user, tasks, openLoops, habits}: ProductivitySuiteProps) {
+  // Cockpit & Capture States
   const [quickCapture, setQuickCapture] = useState('');
   const [plan, setPlan] = useState<(ProductivityPlan & {runtime?: {source: Source}}) | null>(null);
   const [calendar, setCalendar] = useState<(CalendarSuggestion & {runtime?: {source: Source}}) | null>(null);
@@ -75,6 +110,22 @@ export default function ProductivitySuite({user, tasks, openLoops, habits}: Prod
   const [busy, setBusy] = useState('');
   const [error, setError] = useState('');
   const [saved, setSaved] = useState('');
+
+  // Meeting Capture States
+  const [meetingNotes, setMeetingNotes] = useState('');
+  const [meetingResult, setMeetingResult] = useState<MeetingCaptureResult | null>(null);
+  const [isExtractingMeeting, setIsExtractingMeeting] = useState(false);
+  const [meetingError, setMeetingError] = useState('');
+  const [meetingImportStatus, setMeetingImportStatus] = useState('');
+  const [savingMeetingAction, setSavingMeetingAction] = useState('');
+  const [savedMeetingActions, setSavedMeetingActions] = useState<string[]>([]);
+
+  // Life Memory States
+  const [memoryQuery, setMemoryQuery] = useState('');
+  const [memoryResult, setMemoryResult] = useState<(MemorySearchResult & {runtime?: {source: 'gemini' | 'local-fallback'; sourceCount: number}}) | null>(null);
+  const [isSearchingMemory, setIsSearchingMemory] = useState(false);
+  const [memoryError, setMemoryError] = useState('');
+
   const workspaceTasks = useMemo(() => tasks.map(toWorkspaceTask), [tasks]);
   const topTask = workspaceTasks[0];
 
@@ -111,6 +162,7 @@ export default function ProductivitySuite({user, tasks, openLoops, habits}: Prod
     }
   }
 
+  // API Call Handlers
   async function runQuickCapture() {
     if (!quickCapture.trim()) return;
 
@@ -305,267 +357,1017 @@ export default function ProductivitySuite({user, tasks, openLoops, habits}: Prod
     setSaved('Draft saved.');
   }
 
+  // Meeting Capture Handlers
+  async function extractMeetingActions() {
+    const transcript = meetingNotes.trim();
+    if (!transcript || isExtractingMeeting) return;
+
+    setMeetingError('');
+    setIsExtractingMeeting(true);
+    setMeetingResult(null);
+    setSavedMeetingActions([]);
+
+    try {
+      const response = await fetch('/api/meetings/extract', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({
+          transcript,
+          timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Ling could not extract this meeting yet.');
+      }
+
+      setMeetingResult((await response.json()) as MeetingCaptureResult);
+    } catch (error) {
+      setMeetingError(error instanceof Error ? error.message : 'Try again in a moment.');
+    } finally {
+      setIsExtractingMeeting(false);
+    }
+  }
+
+  async function approveCapturedAction(
+    key: string,
+    item: MeetingCaptureResult['actionItems'][number],
+  ) {
+    if (!user || savingMeetingAction || savedMeetingActions.includes(key)) return;
+
+    setMeetingError('');
+    setSavingMeetingAction(key);
+
+    try {
+      await saveApprovedMeetingAction(user.uid, item);
+      setSavedMeetingActions((current) => [...current, key]);
+    } catch (error) {
+      setMeetingError(error instanceof Error ? error.message : 'Unable to save this action.');
+    } finally {
+      setSavingMeetingAction('');
+    }
+  }
+
+  async function importCalendarMeetings() {
+    if (!user) return;
+
+    setMeetingError('');
+    setMeetingImportStatus('Importing calendar meetings...');
+
+    try {
+      const token = await user.getIdToken().catch(() => '');
+      const response = await fetch('/api/meetings/from-calendar', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? {Authorization: `Bearer ${token}`} : {}),
+        },
+        body: JSON.stringify({userId: user.uid}),
+      });
+      const result = (await response.json()) as {created?: Array<{id: string; title: string}>; error?: string};
+
+      if (!response.ok || result.error) {
+        throw new Error(result.error || 'Unable to import calendar meetings.');
+      }
+
+      setMeetingImportStatus(`${result.created?.length ?? 0} meeting note${result.created?.length === 1 ? '' : 's'} imported.`);
+    } catch (error) {
+      setMeetingError(error instanceof Error ? error.message : 'Unable to import calendar meetings.');
+      setMeetingImportStatus('');
+    }
+  }
+
+  // Memory Search Handler
+  async function searchLifeMemory() {
+    const query = memoryQuery.trim();
+    if (!user || !query || isSearchingMemory) return;
+
+    setMemoryError('');
+    setIsSearchingMemory(true);
+
+    try {
+      const token = await user.getIdToken().catch(() => '');
+      const response = await fetch('/api/memory/search', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? {Authorization: `Bearer ${token}`} : {}),
+        },
+        body: JSON.stringify({userId: user.uid, query}),
+      });
+
+      if (!response.ok) {
+        throw new Error('Ling could not search memory yet.');
+      }
+
+      setMemoryResult(await response.json());
+    } catch (error) {
+      setMemoryError(error instanceof Error ? error.message : 'Try again in a moment.');
+    } finally {
+      setIsSearchingMemory(false);
+    }
+  }
+
   const openLoopTotal = openLoops.filter((loop) => loop.status === 'open').length;
   const urgentTask = tasks.find((task) => task.priority === 'do_now' || task.priority === 'at_risk') ?? tasks[0];
+  
   const cockpitStats = [
     {
-      label: 'Tasks captured',
+      label: 'Tasks Captured',
       value: tasks.length,
-      detail: tasks.length ? 'Ready for planning' : 'Start from chat',
+      detail: tasks.length ? 'Ready for planning' : 'Start in chat',
     },
     {
-      label: 'Open loops',
+      label: 'Open Loops',
       value: openLoopTotal,
       detail: openLoopTotal ? 'Needs closure' : 'None waiting',
     },
     {
-      label: 'Urgent item',
+      label: 'Urgent Action',
       value: urgentTask ? urgentTask.priority.replace('_', ' ') : 'None',
-      detail: urgentTask?.title ?? 'No saved task yet',
+      detail: urgentTask?.title ?? 'No tasks saved',
     },
     {
-      label: 'Google status',
-      value: user ? 'Signed in' : 'Guest',
-      detail: user ? 'Workspace sync on' : 'Sign in to save',
+      label: 'Google Status',
+      value: user ? 'Connected' : 'Offline',
+      detail: user ? 'Autopilot active' : 'Sign in to save',
     },
   ];
 
+  const tabs = [
+    { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
+    { id: 'tasks', label: 'Tasks & Inbox', icon: ListTodo },
+    { id: 'studio', label: 'AI Studio', icon: Sparkles },
+    { id: 'habits', label: 'Habits & Routines', icon: Target },
+  ];
+
   return (
-    <div className="rounded-xl border border-brand/20 bg-surface p-5 shadow-sm animate-lingt-scale-in">
-      <div className="flex flex-col justify-between gap-3 md:flex-row md:items-start">
-        <div>
-          <div className="flex items-center gap-2">
-            <Zap className="h-5 w-5 text-brand" />
-            <h2 className="text-xl font-semibold">Productivity Cockpit</h2>
-          </div>
-          <p className="mt-2 text-sm leading-6 text-muted-foreground">
-            Manage your daily flow and saved tasks: generate a rescue plan, escalate reminders, or suggest calendar schedules.
-          </p>
+    <div className="space-y-6">
+      {/* Top Tab Bar Navigation */}
+      <div className="flex justify-center border-b border-border pb-3">
+        <div className="flex flex-wrap items-center gap-1.5 rounded-xl bg-surface-muted/70 p-1 border border-border/40 backdrop-blur-md">
+          {tabs.map((tab) => {
+            const Icon = tab.icon;
+            const isActive = activeTab === tab.id;
+            return (
+              <button
+                key={tab.id}
+                onClick={() => {
+                  setActiveTab(tab.id as any);
+                  setError('');
+                  setSaved('');
+                }}
+                className={`inline-flex items-center gap-2 px-5 py-2.5 text-sm font-medium rounded-lg transition-all duration-300 ${
+                  isActive
+                    ? 'bg-brand text-white shadow-lg shadow-brand/10 scale-[1.02]'
+                    : 'text-muted-foreground hover:bg-surface hover:text-foreground active:scale-[0.98]'
+                }`}
+              >
+                <Icon className="h-4 w-4" />
+                {tab.label}
+              </button>
+            );
+          })}
         </div>
       </div>
 
-      <div className="mt-5 grid gap-3 md:grid-cols-4">
-        {cockpitStats.map((stat, i) => {
-          const delays = [
-            'animation-delay-75',
-            'animation-delay-150',
-            'animation-delay-225',
-            'animation-delay-300',
-          ];
-          return (
-            <div 
-              key={stat.label} 
-              className={`rounded-lg border border-border bg-background p-3 transition-all duration-300 hover:border-brand/20 hover:-translate-y-0.5 hover:shadow-sm animate-lingt-rise ${delays[i] || 'animation-delay-75'}`}
-            >
-              <div className="text-xs text-muted-foreground">{stat.label}</div>
-              <div className="mt-1 truncate text-lg font-semibold">{stat.value}</div>
-              <div className="mt-1 truncate text-xs text-muted-foreground">{stat.detail}</div>
-            </div>
-          );
-        })}
-      </div>
-
-      <div className="mt-4 rounded-lg border border-border bg-background p-3 transition-all duration-300 focus-within:border-brand/40 focus-within:shadow-[0_0_15px_rgba(26,115,232,0.08)]">
-        <div className="flex flex-col gap-2 md:flex-row">
-          <input
-            value={quickCapture}
-            onChange={(event) => setQuickCapture(event.target.value)}
-            placeholder="Quick capture a task, open loop, draft request, or habit..."
-            className="min-w-0 flex-1 bg-transparent px-2 text-sm outline-none"
-          />
-          <button
-            type="button"
-            disabled={!user || !quickCapture.trim() || busy === 'quick'}
-            onClick={runQuickCapture}
-            className="inline-flex items-center justify-center gap-2 rounded-lg bg-brand px-3 py-2 text-sm font-medium text-white transition-all duration-300 hover:bg-brand-deep hover:scale-[1.03] active:scale-[0.97] disabled:cursor-not-allowed disabled:opacity-50 disabled:scale-100"
-          >
-            {busy === 'quick' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
-            Save capture
-          </button>
-        </div>
-      </div>
-
+      {/* Dynamic Notifications Banner */}
       {(error || saved || !user) && (
-        <div className="mt-3 text-sm">
-          {!user && <span className="text-muted-foreground">Sign in to save generated items.</span>}
-          {error && <span className="text-danger">{error}</span>}
-          {saved && <span className="text-success">{saved}</span>}
+        <div className="mx-auto max-w-4xl rounded-lg border border-border bg-surface px-4 py-3 text-sm flex items-center justify-between shadow-sm animate-lingt-scale-in">
+          <div className="flex items-center gap-2">
+            <Zap className={`h-4 w-4 ${error ? 'text-danger' : saved ? 'text-success' : 'text-brand'}`} />
+            <span className="font-medium">
+              {error ? error : saved ? saved : 'Sign in to sync your workspace automatically.'}
+            </span>
+          </div>
+          <button 
+            onClick={() => { setError(''); setSaved(''); }}
+            className="text-xs text-muted-foreground hover:text-foreground font-medium"
+          >
+            Dismiss
+          </button>
         </div>
       )}
 
-      <div className="mt-5 grid gap-4 lg:grid-cols-3">
-        <section className="rounded-lg border border-border bg-background p-4">
-          <div className="flex items-center justify-between gap-3">
-            <div className="flex items-center gap-2 text-sm font-semibold">
-              <ClipboardList className="h-4 w-4 text-brand" />
-              Daily plan
+      {/* Tab Contents */}
+      <div key={activeTab} className="animate-lingt-rise">
+        
+        {/* ==================== DASHBOARD TAB ==================== */}
+        {activeTab === 'dashboard' && (
+          <div className="space-y-6">
+            {/* Stats Cockpit Grid */}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              {cockpitStats.map((stat, i) => {
+                const delays = ['delay-75', 'delay-150', 'delay-225', 'delay-300'];
+                return (
+                  <div
+                    key={stat.label}
+                    className={`rounded-2xl border border-border/80 bg-surface/50 backdrop-blur-sm p-4 transition-all duration-300 hover:border-brand/30 hover:scale-[1.01] hover:shadow-md ${delays[i] || ''}`}
+                  >
+                    <div className="text-xs font-medium uppercase tracking-wider text-muted-foreground">{stat.label}</div>
+                    <div className="mt-2 text-2xl font-bold truncate text-foreground">{stat.value}</div>
+                    <div className="mt-1 text-xs text-muted-foreground truncate">{stat.detail}</div>
+                  </div>
+                );
+              })}
             </div>
-            <button type="button" onClick={generatePlan} className="rounded-lg bg-brand-soft px-3 py-2 text-xs font-medium text-brand-deep">
-              {busy === 'plan' ? 'Generating...' : 'Generate'}
-            </button>
-          </div>
-          {plan ? (
-            <div className="mt-3 space-y-2 text-sm">
-              <p className="leading-6 text-muted-foreground">{plan.summary}</p>
-              {plan.blocks.map((block) => (
-                <div key={`${block.title}-${block.time}`} className="rounded-md border border-border bg-surface p-2">
-                  <div className="font-medium">{block.time}: {block.title}</div>
-                  <div className="mt-1 text-xs text-muted-foreground">{block.reason}</div>
+
+            {/* Quick Capture Input Box */}
+            <div className="rounded-2xl border border-brand/10 bg-surface p-4 shadow-sm">
+              <div className="flex flex-col gap-3 md:flex-row items-center">
+                <div className="relative w-full flex-1">
+                  <Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
+                  <input
+                    value={quickCapture}
+                    onChange={(event) => setQuickCapture(event.target.value)}
+                    placeholder="Quick capture a task, open loop, draft request, or habit..."
+                    className="w-full rounded-xl border border-border bg-background py-2.5 pl-10 pr-4 text-sm outline-none transition focus:border-brand focus:ring-1 focus:ring-brand/35"
+                  />
                 </div>
-              ))}
-              <button type="button" disabled={!user} onClick={savePlan} className="rounded-lg border border-border bg-surface px-3 py-2 text-xs font-medium">
-                Save plan
-              </button>
-            </div>
-          ) : (
-            <p className="mt-3 text-sm text-muted-foreground">Save chat tasks, then generate the rescue plan.</p>
-          )}
-        </section>
-
-        <section className="rounded-lg border border-border bg-background p-4">
-          <div className="flex items-center justify-between gap-3">
-            <div className="flex items-center gap-2 text-sm font-semibold">
-              <Bell className="h-4 w-4 text-danger" />
-              Reminder escalation
-            </div>
-            <button type="button" onClick={escalateReminder} className="rounded-lg bg-brand-soft px-3 py-2 text-xs font-medium text-brand-deep">
-              {busy === 'reminder' ? 'Choosing...' : 'Escalate'}
-            </button>
-          </div>
-          {reminder ? (
-            <div className="mt-3 text-sm">
-              <div className="rounded-md border border-border bg-surface p-2">
-                <div className="font-medium">{reminder.level.replace(/_/g, ' ')}</div>
-                <p className="mt-1 text-xs leading-5 text-muted-foreground">{reminder.message}</p>
+                <button
+                  type="button"
+                  disabled={!user || !quickCapture.trim() || busy === 'quick'}
+                  onClick={runQuickCapture}
+                  className="w-full md:w-auto inline-flex items-center justify-center gap-2 rounded-xl bg-brand px-5 py-2.5 text-sm font-semibold text-white transition-all duration-300 hover:bg-brand-deep hover:scale-[1.02] active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50 disabled:scale-100 shrink-0"
+                >
+                  {busy === 'quick' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
+                  Save capture
+                </button>
               </div>
-              <button type="button" disabled={!user} onClick={saveReminder} className="mt-2 rounded-lg border border-border bg-surface px-3 py-2 text-xs font-medium">
-                Save reminder
-              </button>
-              <button type="button" disabled={!user} onClick={enableNotifications} className="ml-2 mt-2 rounded-lg border border-border bg-surface px-3 py-2 text-xs font-medium">
-                Enable notifications
-              </button>
             </div>
-          ) : (
-            <p className="mt-3 text-sm text-muted-foreground">Escalate the most urgent saved task into required responses.</p>
-          )}
-        </section>
 
-        <section className="rounded-lg border border-border bg-background p-4">
-          <div className="flex items-center justify-between gap-3">
-            <div className="flex items-center gap-2 text-sm font-semibold">
-              <CalendarClock className="h-4 w-4 text-[#34a853]" />
-              Calendar proposal
+            {/* Recommendations Grid */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              
+              {/* Daily Plan & Calendar suggestions */}
+              <div className="space-y-6">
+                {/* Daily Plan Card */}
+                <div className="rounded-2xl border border-border bg-surface p-5 md:p-6 shadow-sm">
+                  <div className="flex items-center justify-between gap-3 border-b border-border/60 pb-3">
+                    <div>
+                      <h3 className="text-lg font-semibold inline-flex items-center gap-2">
+                        <ClipboardList className="h-5 w-5 text-brand" />
+                        Daily Rescue Plan
+                      </h3>
+                      <p className="mt-1 text-xs text-muted-foreground">Staggered timeline generated for your day.</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={generatePlan}
+                      className="rounded-lg bg-brand-soft px-3.5 py-2 text-xs font-semibold text-brand-deep transition-all duration-200 hover:bg-brand/15 active:scale-[0.97]"
+                    >
+                      {busy === 'plan' ? 'Generating...' : 'Generate'}
+                    </button>
+                  </div>
+                  
+                  {plan ? (
+                    <div className="mt-4 space-y-3">
+                      <p className="text-sm leading-6 text-muted-foreground">{plan.summary}</p>
+                      <div className="space-y-2">
+                        {plan.blocks.map((block) => (
+                          <div key={`${block.title}-${block.time}`} className="rounded-lg border border-border bg-background p-3">
+                            <div className="font-semibold text-sm">{block.time}: {block.title}</div>
+                            <div className="mt-1 text-xs text-muted-foreground leading-5">{block.reason}</div>
+                          </div>
+                        ))}
+                      </div>
+                      <button
+                        type="button"
+                        disabled={!user}
+                        onClick={savePlan}
+                        className="rounded-lg border border-border bg-background px-3 py-2 text-xs font-semibold hover:border-brand/40 active:scale-[0.98]"
+                      >
+                        Save Plan
+                      </button>
+                    </div>
+                  ) : (
+                    <p className="mt-4 text-sm text-muted-foreground italic">Add tasks to your workspace first, then click generate to make a custom rescue plan.</p>
+                  )}
+                </div>
+
+                {/* Calendar suggestions */}
+                <div className="rounded-2xl border border-border bg-surface p-5 md:p-6 shadow-sm">
+                  <div className="flex items-center justify-between gap-3 border-b border-border/60 pb-3">
+                    <div>
+                      <h3 className="text-lg font-semibold inline-flex items-center gap-2">
+                        <CalendarClock className="h-5 w-5 text-[#34a853]" />
+                        Calendar Proposals
+                      </h3>
+                      <p className="mt-1 text-xs text-muted-foreground">Smart blocks to protect time in your calendar.</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={suggestCalendar}
+                      className="rounded-lg bg-brand-soft px-3.5 py-2 text-xs font-semibold text-brand-deep transition-all duration-200 hover:bg-brand/15 active:scale-[0.97]"
+                    >
+                      {busy === 'calendar' ? 'Suggesting...' : 'Suggest'}
+                    </button>
+                  </div>
+
+                  {calendar ? (
+                    <div className="mt-4 space-y-3">
+                      {calendar.proposedBlocks.length === 0 && (
+                        <p className="text-sm text-muted-foreground italic">No suggested blocks found for current tasks.</p>
+                      )}
+                      {calendar.proposedBlocks.map((block) => (
+                        <div key={`${block.title}-${block.start}`} className="rounded-lg border border-border bg-background p-4 space-y-2">
+                          <div className="font-semibold text-sm">{block.title}</div>
+                          <div className="text-xs text-muted-foreground leading-5">{block.start} to {block.end}. {block.reason}</div>
+                          <div className="rounded-lg bg-brand-soft/40 px-3 py-1.5 text-xs text-brand-deep border border-brand/10">
+                            <strong>Note:</strong> Double approval required before writing to Calendar.
+                          </div>
+                          <button
+                            type="button"
+                            disabled={!user}
+                            onClick={() => commitCalendarBlock(block)}
+                            className="inline-flex items-center gap-1.5 rounded-lg bg-brand px-3.5 py-2 text-xs font-semibold text-white transition hover:bg-brand-deep"
+                          >
+                            Approve and Commit
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="mt-4 text-sm text-muted-foreground italic">Connect your Google account to get exact time suggestions based on your calendar.</p>
+                  )}
+                </div>
+              </div>
+
+              {/* Routines, Reminders & Escalations */}
+              <div className="space-y-6">
+                {/* Proactive Routine Card */}
+                <div className="rounded-2xl border border-border bg-surface p-5 md:p-6 shadow-sm">
+                  <div className="flex items-center justify-between gap-3 border-b border-border/60 pb-3">
+                    <div>
+                      <h3 className="text-lg font-semibold inline-flex items-center gap-2">
+                        <Repeat className="h-5 w-5 text-[#8430ce]" />
+                        Active Routine runs
+                      </h3>
+                      <p className="mt-1 text-xs text-muted-foreground">Run proactive scanners on your schedule.</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={runRoutine}
+                      className="rounded-lg bg-brand-soft px-3.5 py-2 text-xs font-semibold text-brand-deep transition-all duration-200 hover:bg-brand/15 active:scale-[0.97]"
+                    >
+                      {busy === 'routine' ? 'Running...' : 'Run'}
+                    </button>
+                  </div>
+                  
+                  <div className="mt-4 space-y-3">
+                    <select
+                      value={routineType}
+                      onChange={(event) => setRoutineType(event.target.value as RoutineRun['routineType'])}
+                      className="w-full rounded-xl border border-border bg-background px-3 py-2.5 text-sm outline-none transition focus:border-brand"
+                    >
+                      <option value="morning_briefing">Morning Briefing</option>
+                      <option value="before_meeting_prep">Before-meeting Prep</option>
+                      <option value="deadline_risk_scan">Deadline Risk Scan</option>
+                      <option value="end_of_day_recovery">End-of-day Recovery</option>
+                      <option value="weekly_review">Weekly Review</option>
+                    </select>
+
+                    {routine ? (
+                      <div className="rounded-lg border border-border bg-background p-3 space-y-2">
+                        <p className="text-sm leading-6 text-muted-foreground whitespace-pre-wrap">{routine.message}</p>
+                        <button
+                          type="button"
+                          disabled={!user}
+                          onClick={saveRoutine}
+                          className="rounded-lg border border-border bg-background px-3 py-2 text-xs font-semibold hover:border-brand/40 active:scale-[0.98]"
+                        >
+                          Save Routine logs
+                        </button>
+                      </div>
+                    ) : (
+                      <p className="text-sm text-muted-foreground italic">Select a routine style and click Run to start scanning your context.</p>
+                    )}
+                  </div>
+                </div>
+
+                {/* Reminder Escalation Card */}
+                <div className="rounded-2xl border border-border bg-surface p-5 md:p-6 shadow-sm">
+                  <div className="flex items-center justify-between gap-3 border-b border-border/60 pb-3">
+                    <div>
+                      <h3 className="text-lg font-semibold inline-flex items-center gap-2">
+                        <Bell className="h-5 w-5 text-danger animate-pulse" />
+                        Reminder Escalation
+                      </h3>
+                      <p className="mt-1 text-xs text-muted-foreground">Test how alerts sound when work is ignored.</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={escalateReminder}
+                      className="rounded-lg bg-brand-soft px-3.5 py-2 text-xs font-semibold text-brand-deep transition-all duration-200 hover:bg-brand/15 active:scale-[0.97]"
+                    >
+                      {busy === 'reminder' ? 'Choosing...' : 'Escalate'}
+                    </button>
+                  </div>
+
+                  {reminder ? (
+                    <div className="mt-4 space-y-3 text-sm">
+                      <div className="rounded-lg border border-border bg-background p-4 space-y-2">
+                        <div className="font-semibold text-danger capitalize">Level: {reminder.level.replace(/_/g, ' ')}</div>
+                        <p className="text-xs text-muted-foreground leading-5">{reminder.message}</p>
+                      </div>
+                      <div className="flex flex-wrap gap-2 pt-1">
+                        <button
+                          type="button"
+                          disabled={!user}
+                          onClick={saveReminder}
+                          className="rounded-lg border border-border bg-background px-3.5 py-2 text-xs font-semibold hover:border-brand/40"
+                        >
+                          Save Escalation
+                        </button>
+                        <button
+                          type="button"
+                          disabled={!user}
+                          onClick={enableNotifications}
+                          className="rounded-lg border border-border bg-background px-3.5 py-2 text-xs font-semibold hover:border-brand/40"
+                        >
+                          Enable Notifications
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <p className="mt-4 text-sm text-muted-foreground italic">Selects the top urgent task and simulates what notifications would trigger.</p>
+                  )}
+                </div>
+              </div>
+
             </div>
-            <button type="button" onClick={suggestCalendar} className="rounded-lg bg-brand-soft px-3 py-2 text-xs font-medium text-brand-deep">
-              {busy === 'calendar' ? 'Suggesting...' : 'Suggest'}
-            </button>
           </div>
-          {calendar ? (
-            <div className="mt-3 space-y-2 text-sm">
-              {calendar.proposedBlocks.length === 0 && <p className="text-muted-foreground">No blocks to suggest yet.</p>}
-              {calendar.proposedBlocks.map((block) => (
-                <div key={`${block.title}-${block.start}`} className="rounded-md border border-border bg-surface p-2">
-                  <div className="font-medium">{block.title}</div>
-                  <div className="mt-1 text-xs text-muted-foreground">{block.start} to {block.end}. {block.reason}</div>
-                  <div className="mt-2 text-xs text-brand">Approval required before external Calendar write.</div>
+        )}
+
+        {/* ==================== TASKS & INBOX TAB ==================== */}
+        {activeTab === 'tasks' && (
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            
+            {/* Left Column: Tasks List */}
+            <div className="rounded-2xl border border-border bg-surface p-5 md:p-6 shadow-sm space-y-4">
+              <div className="flex items-center justify-between border-b border-border/60 pb-3">
+                <div>
+                  <h2 className="text-xl font-bold inline-flex items-center gap-2">
+                    <ListChecks className="h-5 w-5 text-brand" />
+                    Tasks
+                  </h2>
+                  <p className="text-xs text-muted-foreground mt-0.5">Approved work items synced with chat.</p>
+                </div>
+                <span className="rounded-full bg-brand-soft px-2.5 py-1 text-xs font-semibold text-brand-deep">
+                  {tasks.length} total
+                </span>
+              </div>
+
+              {tasks.length === 0 && (
+                <div className="rounded-xl border border-dashed border-border bg-background/50 p-6 text-center text-sm text-muted-foreground">
+                  No tasks saved. Type a task in chat and ask Ling to "add this to my tasks".
+                </div>
+              )}
+
+              <div className="grid gap-3">
+                {tasks.map((task, i) => {
+                  const delays = ['delay-75', 'delay-150', 'delay-225', 'delay-300'];
+                  const priorityStyles = {
+                    do_now: 'bg-red-50 text-red-600 border-red-200',
+                    at_risk: 'bg-orange-50 text-orange-600 border-orange-200',
+                    schedule_today: 'bg-blue-50 text-blue-600 border-blue-200',
+                    can_wait: 'bg-zinc-50 text-zinc-600 border-zinc-200',
+                  };
+                  return (
+                    <div
+                      key={task.id}
+                      className={`rounded-xl border border-border bg-background p-4 transition-all duration-300 hover:border-brand/30 hover:scale-[1.01] hover:shadow-sm ${delays[i] || ''}`}
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <h4 className="font-semibold text-sm text-foreground">{task.title}</h4>
+                          <p className="mt-1 text-xs text-muted-foreground leading-5">{task.reason}</p>
+                        </div>
+                        <span className={`rounded-full border px-2.5 py-0.5 text-[10px] font-semibold uppercase ${priorityStyles[task.priority] || ''}`}>
+                          {task.priority.replace('_', ' ')}
+                        </span>
+                      </div>
+                      <div className="mt-3.5 flex items-center justify-between text-xs text-muted-foreground border-t border-border/40 pt-2.5">
+                        <span>Due: {task.due}</span>
+                        <span className="font-medium text-foreground">{statusLabel(task.status)}</span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Right Column: Open Loops */}
+            <div className="rounded-2xl border border-border bg-surface p-5 md:p-6 shadow-sm space-y-4">
+              <div className="flex items-center justify-between border-b border-border/60 pb-3">
+                <div>
+                  <h2 className="text-xl font-bold inline-flex items-center gap-2">
+                    <Bell className="h-5 w-5 text-danger" />
+                    Open Loops
+                  </h2>
+                  <p className="text-xs text-muted-foreground mt-0.5">Commitments and unresolved email threads.</p>
+                </div>
+                <span className="rounded-full bg-danger-soft px-2.5 py-1 text-xs font-semibold text-danger">
+                  {openLoopTotal} open
+                </span>
+              </div>
+
+              {openLoops.length === 0 && (
+                <div className="rounded-xl border border-dashed border-border bg-background/50 p-6 text-center text-sm text-muted-foreground">
+                  No open loops. Ling will auto-detect unresolved commitments when you sync Gmail.
+                </div>
+              )}
+
+              <div className="grid gap-3">
+                {openLoops.map((loop, i) => {
+                  const delays = ['delay-75', 'delay-150', 'delay-225', 'delay-300'];
+                  return (
+                    <div
+                      key={loop.id}
+                      className={`rounded-xl border border-border bg-background p-4 transition-all duration-300 hover:border-brand/30 hover:scale-[1.01] hover:shadow-sm ${delays[i] || ''}`}
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <h4 className="font-semibold text-sm text-foreground">{loop.title}</h4>
+                          <p className="mt-1 text-xs text-muted-foreground leading-5">{loop.reason}</p>
+                        </div>
+                        <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold border ${
+                          loop.status === 'resolved' 
+                            ? 'bg-success-soft text-success border-success/20' 
+                            : 'bg-warning-soft text-warning border-warning/20'
+                        }`}>
+                          {statusLabel(loop.status)}
+                        </span>
+                      </div>
+                      <div className="mt-4 flex flex-wrap gap-2 border-t border-border/40 pt-3">
+                        <button
+                          className="rounded-lg bg-brand px-3.5 py-1.5 text-xs font-semibold text-white transition hover:bg-brand-deep active:scale-[0.96] disabled:opacity-50 disabled:pointer-events-none"
+                          disabled={loop.status === 'resolved'}
+                          onClick={() => setOpenLoopStatus(loop.id, 'resolved')}
+                        >
+                          Resolve
+                        </button>
+                        <button
+                          className="rounded-lg border border-border bg-surface px-3 py-1.5 text-xs font-semibold transition hover:bg-surface-muted active:scale-[0.96]"
+                          onClick={() => setOpenLoopStatus(loop.id, 'scheduled')}
+                        >
+                          {loop.action}
+                        </button>
+                        <button
+                          className="rounded-lg border border-border bg-surface px-3 py-1.5 text-xs font-semibold text-muted-foreground transition hover:bg-surface-muted hover:text-foreground active:scale-[0.96]"
+                          onClick={() => setOpenLoopStatus(loop.id, 'snoozed')}
+                        >
+                          Snooze
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+          </div>
+        )}
+
+        {/* ==================== AI STUDIO TAB ==================== */}
+        {activeTab === 'studio' && (
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            
+            {/* Left Column: Meeting Capture */}
+            <div className="rounded-2xl border border-border bg-surface p-5 md:p-6 shadow-sm space-y-4">
+              <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-start border-b border-border/60 pb-3">
+                <div>
+                  <h2 className="text-xl font-bold inline-flex items-center gap-2">
+                    <Mic className="h-5 w-5 text-brand" />
+                    Meeting Capture
+                  </h2>
+                  <p className="text-xs text-muted-foreground mt-0.5">Extract summary, decisions, and action items.</p>
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  {meetingResult && (
+                    <span className="rounded-full bg-brand-soft px-2 py-0.5 text-[10px] font-semibold text-brand-deep">
+                      {meetingResult.runtime.source}
+                    </span>
+                  )}
                   <button
                     type="button"
                     disabled={!user}
-                    onClick={() => commitCalendarBlock(block)}
-                    className="mt-2 rounded-lg border border-border bg-background px-3 py-2 text-xs font-medium"
+                    onClick={importCalendarMeetings}
+                    className="rounded-lg border border-border bg-background px-3 py-1.5 text-xs font-semibold transition hover:border-brand/40 active:scale-[0.97] disabled:opacity-50"
                   >
-                    Approve event
+                    Import Calendar Notes
                   </button>
                 </div>
-              ))}
-            </div>
-          ) : (
-            <p className="mt-3 text-sm text-muted-foreground">Suggest protected time blocks before any Calendar write.</p>
-          )}
-        </section>
+              </div>
 
-        <section className="rounded-lg border border-border bg-background p-4">
-          <div className="flex items-center gap-2 text-sm font-semibold">
-            <Target className="h-4 w-4 text-[#34a853]" />
-            Habit builder
-          </div>
-          <div className="mt-3 flex gap-2">
-            <input
-              value={habitPrompt}
-              onChange={(event) => setHabitPrompt(event.target.value)}
-              placeholder="Goal or habit to track..."
-              className="min-w-0 flex-1 rounded-lg border border-border bg-surface px-3 py-2 text-sm outline-none"
-            />
-            <button type="button" onClick={suggestHabit} className="rounded-lg bg-brand-soft px-3 py-2 text-xs font-medium text-brand-deep">
-              {busy === 'habit' ? '...' : 'Suggest'}
-            </button>
-          </div>
-          {habit && (
-            <div className="mt-3 rounded-md border border-border bg-surface p-2 text-sm">
-              <div className="font-medium">{habit.title}</div>
-              <div className="mt-1 text-xs text-muted-foreground">{habit.cadence}: {habit.target}</div>
-              <button type="button" disabled={!user} onClick={saveHabit} className="mt-2 rounded-lg border border-border bg-background px-3 py-2 text-xs font-medium">
-                Save habit
-              </button>
-            </div>
-          )}
-        </section>
+              <div className="rounded-xl border border-border bg-background p-3 transition focus-within:border-brand/40">
+                <textarea
+                  value={meetingNotes}
+                  onChange={(event) => setMeetingNotes(event.target.value)}
+                  className="min-h-36 w-full resize-none bg-transparent text-sm leading-6 outline-none"
+                  placeholder="Paste raw transcript, markdown, or summary bullet points here..."
+                />
+                <div className="mt-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 border-t border-border/40 pt-3">
+                  <p className="text-[11px] text-muted-foreground">
+                    Ling only extracts actions. Items stay drafts until approved.
+                  </p>
+                  <button
+                    type="button"
+                    disabled={!meetingNotes.trim() || isExtractingMeeting}
+                    onClick={extractMeetingActions}
+                    className="inline-flex items-center justify-center gap-2 rounded-lg bg-brand px-4 py-2 text-xs font-semibold text-white transition hover:bg-brand-deep active:scale-[0.97] disabled:opacity-50"
+                  >
+                    {isExtractingMeeting ? <Loader2 className="h-3 w-3 animate-spin" /> : <Sparkles className="h-3 w-3" />}
+                    {isExtractingMeeting ? 'Extracting...' : 'Extract actions'}
+                  </button>
+                </div>
+              </div>
 
-        <section className="rounded-lg border border-border bg-background p-4">
-          <div className="flex items-center justify-between gap-3">
-            <div className="flex items-center gap-2 text-sm font-semibold">
-              <Repeat className="h-4 w-4 text-[#64748b]" />
-              Proactive routine
-            </div>
-            <button type="button" onClick={runRoutine} className="rounded-lg bg-brand-soft px-3 py-2 text-xs font-medium text-brand-deep">
-              {busy === 'routine' ? 'Running...' : 'Run'}
-            </button>
-          </div>
-          <select
-            value={routineType}
-            onChange={(event) => setRoutineType(event.target.value as RoutineRun['routineType'])}
-            className="mt-3 w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm outline-none"
-          >
-            <option value="morning_briefing">Morning briefing</option>
-            <option value="before_meeting_prep">Before-meeting prep</option>
-            <option value="deadline_risk_scan">Deadline risk scan</option>
-            <option value="end_of_day_recovery">End-of-day recovery</option>
-            <option value="weekly_review">Weekly review</option>
-          </select>
-          {routine && (
-            <div className="mt-3 rounded-md border border-border bg-surface p-2 text-sm">
-              <p className="leading-6 text-muted-foreground">{routine.message}</p>
-              <button type="button" disabled={!user} onClick={saveRoutine} className="mt-2 rounded-lg border border-border bg-background px-3 py-2 text-xs font-medium">
-                Save routine
-              </button>
-            </div>
-          )}
-        </section>
+              {meetingError && (
+                <div className="flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 p-3 text-xs text-danger">
+                  <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                  {meetingError}
+                </div>
+              )}
+              {meetingImportStatus && (
+                <div className="rounded-lg border border-border bg-background p-3 text-xs text-muted-foreground">
+                  {meetingImportStatus}
+                </div>
+              )}
 
-        <section className="rounded-lg border border-border bg-background p-4">
-          <div className="flex items-center gap-2 text-sm font-semibold">
-            <PenLine className="h-4 w-4 text-[#fbbc04]" />
-            Drafting studio
-          </div>
-          <textarea
-            value={draftPrompt}
-            onChange={(event) => setDraftPrompt(event.target.value)}
-            placeholder="Draft a follow-up, extension request, recap, or study plan..."
-            className="mt-3 min-h-24 w-full resize-none rounded-lg border border-border bg-surface px-3 py-2 text-sm outline-none"
-          />
-          <button type="button" onClick={generateDraft} className="mt-2 rounded-lg bg-brand-soft px-3 py-2 text-xs font-medium text-brand-deep">
-            {busy === 'draft' ? 'Drafting...' : 'Generate draft'}
-          </button>
-          {draft && (
-            <div className="mt-3 rounded-md border border-border bg-surface p-2 text-sm">
-              <div className="font-medium capitalize">{draft.title}</div>
-              <pre className="mt-2 whitespace-pre-wrap font-sans text-xs leading-5 text-muted-foreground">{draft.content}</pre>
-              <button type="button" disabled={!user} onClick={saveDraft} className="mt-2 rounded-lg border border-border bg-background px-3 py-2 text-xs font-medium">
-                Save draft
-              </button>
+              {/* Extraction Results */}
+              {meetingResult && (
+                <div className="space-y-4 pt-3 border-t border-border/60">
+                  <div>
+                    <h4 className="text-sm font-semibold text-foreground">Summary</h4>
+                    <p className="mt-1 text-xs leading-5 text-muted-foreground">{meetingResult.summary}</p>
+                  </div>
+
+                  <div className="grid gap-3 md:grid-cols-2">
+                    <div>
+                      <h4 className="text-sm font-semibold text-foreground">Decisions</h4>
+                      <div className="mt-1.5 space-y-1">
+                        {meetingResult.decisions.length === 0 && <div className="text-xs text-muted-foreground italic">None found.</div>}
+                        {meetingResult.decisions.map((dec) => (
+                          <div key={dec} className="rounded-lg border border-border/60 bg-background p-2 text-xs text-muted-foreground">{dec}</div>
+                        ))}
+                      </div>
+                    </div>
+                    <div>
+                      <h4 className="text-sm font-semibold text-foreground">Open Loops</h4>
+                      <div className="mt-1.5 space-y-1.5">
+                        {meetingResult.openLoops.length === 0 && <div className="text-xs text-muted-foreground italic">None found.</div>}
+                        {meetingResult.openLoops.map((loop) => (
+                          <div key={`${loop.title}-${loop.action}`} className="rounded-lg border border-warning/30 bg-warning-soft/30 p-2.5">
+                            <div className="text-xs font-semibold">{loop.title}</div>
+                            <div className="mt-1 text-[10px] text-muted-foreground leading-4">{loop.reason} (Next: {loop.action})</div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div>
+                    <h4 className="text-sm font-semibold text-foreground">Extracted Action Items</h4>
+                    <div className="mt-2 space-y-2">
+                      {meetingResult.actionItems.length === 0 && <div className="text-xs text-muted-foreground italic">None found.</div>}
+                      {meetingResult.actionItems.map((item, index) => {
+                        const key = `${item.title}-${index}`;
+                        const saved = savedMeetingActions.includes(key);
+                        return (
+                          <div key={key} className="rounded-lg border border-border bg-background p-3.5 flex items-start justify-between gap-3">
+                            <div className="space-y-1">
+                              <div className="font-semibold text-xs text-foreground">{item.title}</div>
+                              <div className="text-[10px] text-muted-foreground">Owner: {item.owner} | Due: {item.deadline} | Confidence: {item.confidence}</div>
+                              <p className="text-[11px] text-muted-foreground leading-4">{item.nextStep}</p>
+                            </div>
+                            <button
+                              type="button"
+                              disabled={!user || saved || savingMeetingAction === key}
+                              onClick={() => approveCapturedAction(key, item)}
+                              className="rounded-lg bg-brand-soft px-3 py-1.5 text-xs font-semibold text-brand-deep transition hover:bg-brand/15 disabled:opacity-50 shrink-0"
+                            >
+                              {saved ? 'Approved' : 'Approve'}
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Saved Meeting Actions List */}
+              <div className="pt-4 border-t border-border/60">
+                <h3 className="text-sm font-bold text-foreground">Approved Action Items</h3>
+                <div className="mt-2.5 space-y-2">
+                  {meetingActionItems.length === 0 && (
+                    <div className="rounded-lg border border-dashed border-border bg-background/50 p-4 text-xs text-center text-muted-foreground">
+                      No approved meeting action items yet.
+                    </div>
+                  )}
+                  {meetingActionItems.map((item) => (
+                    <div key={item.id} className="flex items-center justify-between gap-3 rounded-lg border border-border bg-background p-3 text-xs">
+                      <div className="flex items-start gap-2">
+                        <CheckCircle2 className={`mt-0.5 h-4 w-4 shrink-0 ${item.approved ? 'text-success' : 'text-brand'}`} />
+                        <div>
+                          <span className={item.approved ? 'line-through text-muted-foreground' : 'font-medium'}>{item.text}</span>
+                          {(item.owner || item.deadline) && (
+                            <div className="mt-0.5 text-[10px] text-muted-foreground">
+                              {item.owner ? `Owner: ${item.owner}` : ''}{item.owner && item.deadline ? ' | ' : ''}{item.deadline ? `Due: ${item.deadline}` : ''}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        disabled={item.approved}
+                        onClick={() => approveAction(item.id)}
+                        className="rounded bg-brand-soft px-2.5 py-1 text-[10px] font-semibold text-brand-deep transition hover:bg-brand/15 disabled:opacity-50 shrink-0"
+                      >
+                        {item.approved ? 'Done' : 'Approve'}
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
             </div>
-          )}
-        </section>
+
+            {/* Right Column: Life Memory & Drafting Studio */}
+            <div className="space-y-6">
+              {/* Life Memory Card */}
+              <div className="rounded-2xl border border-border bg-surface p-5 md:p-6 shadow-sm space-y-4">
+                <div>
+                  <h2 className="text-xl font-bold inline-flex items-center gap-2">
+                    <Search className="h-5 w-5 text-[#8430ce]" />
+                    Life Memory
+                  </h2>
+                  <p className="text-xs text-muted-foreground mt-0.5">Semantic search query across your entire workspace.</p>
+                </div>
+
+                <form
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    searchLifeMemory();
+                  }}
+                  className="flex gap-2 rounded-xl border border-border bg-background p-2 transition focus-within:border-brand/40"
+                >
+                  <input
+                    value={memoryQuery}
+                    onChange={(event) => setMemoryQuery(event.target.value)}
+                    placeholder="What did I decide, promise, or need to follow up on?"
+                    className="min-w-0 flex-1 bg-transparent px-2 text-xs outline-none"
+                  />
+                  <button
+                    type="submit"
+                    disabled={!user || !memoryQuery.trim() || isSearchingMemory}
+                    className="inline-flex items-center gap-1.5 rounded-lg bg-brand px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-brand-deep active:scale-[0.96] disabled:opacity-50 shrink-0"
+                  >
+                    {isSearchingMemory ? <Loader2 className="h-3 w-3 animate-spin" /> : <Search className="h-3 w-3" />}
+                    Search
+                  </button>
+                </form>
+
+                {memoryResult && (
+                  <div className="space-y-3 border-t border-border/60 pt-3">
+                    <div className="rounded-xl border border-border bg-background p-3.5 space-y-1.5">
+                      <div className="text-xs font-bold text-foreground">Answer</div>
+                      <p className="text-xs leading-5 text-muted-foreground">{memoryResult.answer}</p>
+                      {memoryResult.suggestedNextAction && (
+                        <div className="text-[10px] text-brand-deep font-semibold bg-brand-soft/40 px-2 py-1 rounded inline-block border border-brand/5">
+                          Suggested Next: {memoryResult.suggestedNextAction}
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="space-y-2">
+                      <h4 className="text-xs font-semibold text-foreground">Retrieved Context Sources</h4>
+                      {memoryResult.sources.length === 0 && <div className="text-xs text-muted-foreground italic">No matching sources.</div>}
+                      {memoryResult.sources.map((source) => (
+                        <div key={`${source.type}-${source.id}`} className="rounded-lg border border-border bg-background p-3">
+                          <div className="flex items-center justify-between text-xs font-semibold">
+                            <span>{source.title}</span>
+                            <span className="rounded-full bg-surface-muted px-2 py-0.5 text-[9px] text-muted-foreground uppercase">{source.source}</span>
+                          </div>
+                          <p className="mt-1.5 text-[10px] leading-4 text-muted-foreground">{source.snippet}</p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Drafting Studio Card */}
+              <div className="rounded-2xl border border-border bg-surface p-5 md:p-6 shadow-sm space-y-4">
+                <div>
+                  <h2 className="text-xl font-bold inline-flex items-center gap-2">
+                    <PenLine className="h-5 w-5 text-[#fbbc04]" />
+                    Drafting Studio
+                  </h2>
+                  <p className="text-xs text-muted-foreground mt-0.5">Draft emails, extension requests, or follow-ups.</p>
+                </div>
+
+                <div className="space-y-3">
+                  <textarea
+                    value={draftPrompt}
+                    onChange={(event) => setDraftPrompt(event.target.value)}
+                    placeholder="Describe what you want to write (e.g. extension request to Prof)..."
+                    className="min-h-24 w-full rounded-xl border border-border bg-background p-3 text-xs leading-5 outline-none transition focus:border-brand"
+                  />
+                  
+                  <button
+                    type="button"
+                    onClick={generateDraft}
+                    disabled={busy === 'draft' || (!draftPrompt.trim() && tasks.length === 0)}
+                    className="rounded-lg bg-brand px-4 py-2 text-xs font-semibold text-white transition hover:bg-brand-deep active:scale-[0.97] disabled:opacity-50"
+                  >
+                    {busy === 'draft' ? 'Drafting...' : 'Generate Draft'}
+                  </button>
+
+                  {draft && (
+                    <div className="rounded-xl border border-border bg-background p-4 space-y-3">
+                      <div className="text-xs font-bold text-foreground capitalize">{draft.title}</div>
+                      <pre className="text-xs font-sans text-muted-foreground leading-5 whitespace-pre-wrap select-all">{draft.content}</pre>
+                      <button
+                        type="button"
+                        disabled={!user}
+                        onClick={saveDraft}
+                        className="rounded-lg border border-border bg-background px-3 py-1.5 text-xs font-semibold hover:border-brand/40 active:scale-[0.97]"
+                      >
+                        Save Draft
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+
+          </div>
+        )}
+
+        {/* ==================== HABITS & ROUTINES TAB ==================== */}
+        {activeTab === 'habits' && (
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            
+            {/* Left Column: Habits List & Builder */}
+            <div className="rounded-2xl border border-border bg-surface p-5 md:p-6 shadow-sm space-y-5">
+              <div className="flex items-center justify-between border-b border-border/60 pb-3">
+                <div>
+                  <h2 className="text-xl font-bold inline-flex items-center gap-2">
+                    <Target className="h-5 w-5 text-[#34a853]" />
+                    Habit Board
+                  </h2>
+                  <p className="text-xs text-muted-foreground mt-0.5">Track your daily and weekly habits.</p>
+                </div>
+                <span className="rounded-full bg-success-soft px-2.5 py-1 text-xs font-semibold text-success">
+                  {habits.length} habits
+                </span>
+              </div>
+
+              {/* Habits List */}
+              <div className="space-y-3">
+                {habits.length === 0 && (
+                  <div className="rounded-xl border border-dashed border-border bg-background/50 p-6 text-center text-sm text-muted-foreground">
+                    No habits set up yet. Use the Habit Builder below to add a habit to your board.
+                  </div>
+                )}
+                {habits.map((h) => (
+                  <div key={h.id} className="rounded-xl border border-border bg-background p-4 flex items-center justify-between gap-4">
+                    <div className="space-y-1">
+                      <div className="font-semibold text-sm text-foreground">{h.title}</div>
+                      <div className="text-xs text-muted-foreground">{h.cadence} | Target: {h.target}</div>
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <span className="rounded-full bg-success-soft px-2 py-0.5 text-[10px] font-semibold text-success border border-success/15 shrink-0">
+                        {h.streak} streak
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => checkInHabit(h.id, true)}
+                        className="rounded bg-brand px-2.5 py-1 text-[10px] font-semibold text-white transition hover:bg-brand-deep active:scale-[0.96]"
+                      >
+                        Done
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => checkInHabit(h.id, false)}
+                        className="rounded border border-border bg-surface px-2 py-1 text-[10px] font-semibold transition hover:bg-surface-muted active:scale-[0.96]"
+                      >
+                        Miss
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              {/* Habit Builder Tool */}
+              <div className="border-t border-border/60 pt-4 space-y-3">
+                <h4 className="text-sm font-semibold text-foreground">Habit Builder</h4>
+                <div className="flex gap-2 rounded-xl border border-border bg-background p-2 transition focus-within:border-brand/40">
+                  <input
+                    value={habitPrompt}
+                    onChange={(event) => setHabitPrompt(event.target.value)}
+                    placeholder="Enter a habit goal (e.g. read 20 mins every morning)..."
+                    className="min-w-0 flex-1 bg-transparent px-2 text-xs outline-none"
+                  />
+                  <button
+                    type="button"
+                    onClick={suggestHabit}
+                    disabled={!habitPrompt.trim() || busy === 'habit'}
+                    className="rounded-lg bg-brand px-3.5 py-1.5 text-xs font-semibold text-white transition hover:bg-brand-deep active:scale-[0.97]"
+                  >
+                    Suggest
+                  </button>
+                </div>
+
+                {habit && (
+                  <div className="rounded-xl border border-border bg-background p-3.5 space-y-2">
+                    <div className="font-semibold text-xs text-foreground">{habit.title}</div>
+                    <div className="text-[10px] text-muted-foreground">{habit.cadence} | Target: {habit.target}</div>
+                    <button
+                      type="button"
+                      disabled={!user}
+                      onClick={saveHabit}
+                      className="rounded-lg bg-brand px-3 py-1.5 text-xs font-semibold text-white hover:bg-brand-deep"
+                    >
+                      Save to Habit Board
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Right Column: Routines Configurations & Calendar Plan & Escalations */}
+            <div className="space-y-6">
+              
+              {/* Routines Card */}
+              <div className="rounded-2xl border border-border bg-surface p-5 md:p-6 shadow-sm space-y-4">
+                <div>
+                  <h2 className="text-xl font-bold inline-flex items-center gap-2">
+                    <Repeat className="h-5 w-5 text-brand" />
+                    Proactive Routines
+                  </h2>
+                  <p className="text-xs text-muted-foreground mt-0.5">Toggle background automations and scanners.</p>
+                </div>
+
+                <div className="grid gap-3">
+                  {routines.map((routine) => (
+                    <div key={routine.id} className="rounded-xl border border-border bg-background p-4 flex items-start justify-between gap-3">
+                      <div className="space-y-1">
+                        <div className="font-semibold text-xs text-foreground">{routine.name}</div>
+                        <div className="text-[10px] text-muted-foreground">{routine.schedule}</div>
+                        <p className="text-xs text-muted-foreground leading-5 pt-1">{routine.detail}</p>
+                      </div>
+                      <button
+                        onClick={() => toggleRoutine(routine.id)}
+                        className={`rounded-full px-3 py-1 text-[10px] font-bold border transition ${
+                          routine.enabled
+                            ? 'bg-brand text-white border-brand shadow-sm'
+                            : 'bg-background text-muted-foreground border-border hover:bg-surface'
+                        }`}
+                      >
+                        {routine.enabled ? 'ON' : 'OFF'}
+                      </button>
+                    </div>
+                  ))}
+                  {routines.length === 0 && (
+                    <div className="text-center py-4 text-xs text-muted-foreground italic">No routines synced.</div>
+                  )}
+                </div>
+              </div>
+
+              {/* Calendar Plan Card */}
+              <div className="rounded-2xl border border-border bg-surface p-5 md:p-6 shadow-sm space-y-4">
+                <div>
+                  <h2 className="text-xl font-bold inline-flex items-center gap-2">
+                    <CalendarClock className="h-5 w-5 text-[#34a853]" />
+                    Calendar Plan
+                  </h2>
+                  <p className="text-xs text-muted-foreground mt-0.5">Committed blocks scheduled in your external calendar.</p>
+                </div>
+
+                <div className="space-y-2.5">
+                  {calendarBlocks.length === 0 && (
+                    <div className="rounded-xl border border-dashed border-border bg-background/50 p-4 text-xs text-center text-muted-foreground">
+                      No calendar blocks committed yet. Approve suggestions on the Dashboard tab.
+                    </div>
+                  )}
+                  {calendarBlocks.map((block) => (
+                    <div key={block.id} className="rounded-lg bg-background p-3 flex justify-between items-center text-xs border border-border">
+                      <div>
+                        <div className="font-semibold">{block.title}</div>
+                        <div className="text-muted-foreground mt-0.5">{block.time}</div>
+                      </div>
+                      <span className="rounded-full bg-success-soft px-2 py-0.5 text-[9px] font-semibold text-success uppercase">{block.status}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+            </div>
+          </div>
+        )}
+
       </div>
     </div>
   );
