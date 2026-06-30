@@ -29,7 +29,7 @@ LingT is a showcases of how different **Google Products** coordinate seamlessly 
 
 | Google Product 🤖 | Role in LingT 🌟 | Tech Stack Depth 🛠️ |
 | :--- | :--- | :--- |
-| **Google AI Studio & Gemini** | **Core Brain & Reasoning**: Powers all intent parsing, task extraction, meeting capture, and drafting workflows using structured `gemini-1.5-flash` schemas. | LLM Cognition |
+| **Google AI Studio & Gemini** | **Core Brain & Reasoning**: Powers all intent parsing, task extraction, meeting capture, and drafting workflows using structured `gemini-3.5-flash` schemas. | LLM Cognition |
 | **Google Agentic Development Kit (ADK)** | **Multi-Agent Team Framework**: Organizes, builds, and instantiates our specialist agents (`planner_agent`, `calendar_agent`, `memory_agent`, etc.) at runtime. | Agentic Framework |
 | **Google Firebase Auth** | **Secure Google Sign-In**: Authenticates users and generates secure verification tokens for backend requests. | Identity & Auth |
 | **Google Cloud Firestore** | **Real-Time Database Sync**: Keeps the dashboard, tasks, habits, and message logs synchronized across client and server instantly. | Real-Time NoSQL DB |
