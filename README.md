@@ -1,5 +1,22 @@
 # 🌟 LingT: The Google-Powered Autonomous Agentic Workspace 🚀
 
+<p align="center">
+  <img src="https://img.shields.io/badge/Google_Cloud-4285F4?style=for-the-badge&logo=google-cloud&logoColor=white" alt="Google Cloud" />
+  <img src="https://img.shields.io/badge/Firebase_Firestore-FFCA28?style=for-the-badge&logo=firebase&logoColor=black" alt="Firebase" />
+  <img src="https://img.shields.io/badge/Gemini_AI_Studio-8E75C2?style=for-the-badge&logo=google&logoColor=white" alt="Gemini" />
+  <img src="https://img.shields.io/badge/Google_ADK-4285F4?style=for-the-badge&logo=google&logoColor=white" alt="Google ADK" />
+  <img src="https://img.shields.io/badge/Google_Calendar-4285F4?style=for-the-badge&logo=google-calendar&logoColor=white" alt="Google Calendar" />
+  <img src="https://img.shields.io/badge/Gmail_Autopilot-D14836?style=for-the-badge&logo=gmail&logoColor=white" alt="Gmail" />
+</p>
+
+<p align="center">
+  <img src="https://img.shields.io/badge/Next.js_15-000000?style=for-the-badge&logo=nextdotjs&logoColor=white" alt="Next.js" />
+  <img src="https://img.shields.io/badge/React_19-20232A?style=for-the-badge&logo=react&logoColor=61DAFB" alt="React" />
+  <img src="https://img.shields.io/badge/TypeScript-007ACC?style=for-the-badge&logo=typescript&logoColor=white" alt="TypeScript" />
+  <img src="https://img.shields.io/badge/Tailwind_CSS-38B2AC?style=for-the-badge&logo=tailwind-css&logoColor=white" alt="Tailwind" />
+  <img src="https://img.shields.io/badge/LangGraph_State-1C3C3A?style=for-the-badge&logo=chainlink&logoColor=white" alt="LangGraph" />
+</p>
+
 Welcome to **LingT**, a production-grade AI productivity workspace built entirely on the **Google Cloud, Firebase, and Gemini Developer Ecosystem**. LingT shifts the paradigm from passive, easily-ignored alerts to **active, autonomous agentic execution** by using Google's state-of-the-art AI, database, and API platforms to handle the friction of planning, drafting, and scheduling.
 
 ---

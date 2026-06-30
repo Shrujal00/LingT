@@ -189,7 +189,10 @@ export default function ProductivitySuite({
 
   useEffect(() => {
     if (user && isGoogleConnected) {
-      fetchCalendarEvents();
+      const timer = setTimeout(() => {
+        fetchCalendarEvents();
+      }, 0);
+      return () => clearTimeout(timer);
     }
   }, [user, isGoogleConnected, fetchCalendarEvents]);
 

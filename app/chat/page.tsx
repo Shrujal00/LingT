@@ -208,6 +208,18 @@ export default function ChatPage() {
 
   useEffect(() => onAuthStateChanged(firebaseAuth, setUser, () => setUser(null)), []);
 
+  const lastUserUid = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    if (lastUserUid.current !== undefined && lastUserUid.current !== user?.uid) {
+      setConversationId(crypto.randomUUID());
+      setMessages(starterMessages);
+      setSavedMessageIds([]);
+      setSessions([]);
+      setLastSource('ready');
+    }
+    lastUserUid.current = user?.uid;
+  }, [user]);
+
   useEffect(() => {
     bottomRef.current?.scrollIntoView({behavior: 'smooth'});
   }, [messages, isThinking]);
@@ -730,15 +742,27 @@ export default function ChatPage() {
                         )}
 
                         <div className="pt-2 border-t border-border/40 flex items-center justify-between gap-3">
-                          <button
-                            onClick={() => approvePlan(result)}
-                            disabled={savedMessageIds.includes(result.assistantMessage)}
-                            className="rounded-lg bg-brand px-4 py-2 text-xs font-semibold text-white transition hover:bg-brand-deep active:scale-[0.96] disabled:opacity-50"
-                          >
-                            {savedMessageIds.includes(result.assistantMessage)
-                              ? 'Workspace Synced'
-                              : 'Approve & Commit'}
-                          </button>
+                          {!user ? (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                alert('Please sign in using the button in the bottom-left to save and commit tasks to your workspace!');
+                              }}
+                              className="rounded-lg bg-surface-muted border border-border px-4 py-2 text-xs font-semibold text-muted-foreground transition hover:bg-surface hover:text-foreground active:scale-[0.96] w-full text-center"
+                            >
+                              🔒 Sign in to Commit
+                            </button>
+                          ) : (
+                            <button
+                              onClick={() => approvePlan(result)}
+                              disabled={savedMessageIds.includes(result.assistantMessage)}
+                              className="rounded-lg bg-brand px-4 py-2 text-xs font-semibold text-white transition hover:bg-brand-deep active:scale-[0.96] disabled:opacity-50"
+                            >
+                              {savedMessageIds.includes(result.assistantMessage)
+                                ? 'Workspace Synced'
+                                : 'Approve & Commit'}
+                            </button>
+                          )}
                         </div>
                       </div>
                     </div>
