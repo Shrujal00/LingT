@@ -13,6 +13,7 @@ export default function WorkspacePage() {
     toggleRoutine,
     approveAction,
     checkInHabit,
+    setTaskStatus,
   } = useWorkspaceSync();
 
   const { tasks, openLoops, routines, meetingActionItems, habits } = workspace;
@@ -46,6 +47,7 @@ export default function WorkspacePage() {
             toggleRoutine={toggleRoutine}
             approveAction={approveAction}
             checkInHabit={checkInHabit}
+            setTaskStatus={setTaskStatus}
             loading={loading}
           />
         </div>

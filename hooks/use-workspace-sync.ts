@@ -10,6 +10,7 @@ import {
   updateHabitCheckIn,
   updateOpenLoopStatus,
   updateRoutineEnabled,
+  updateTaskStatus,
   type UserWorkspace,
 } from '@/lib/firebase/workspace';
 import {
@@ -19,6 +20,7 @@ import {
   routines,
   tasks,
   type OpenLoopStatus,
+  type TaskStatus,
 } from '@/lib/lingt-data';
 
 export function useWorkspaceSync() {
@@ -129,6 +131,19 @@ export function useWorkspaceSync() {
     }
   }
 
+  async function setTaskStatus(id: string, status: TaskStatus) {
+    setWorkspace((current) => ({
+      ...current,
+      tasks: current.tasks.map((item) =>
+        item.id === id ? {...item, status} : item
+      ),
+    }));
+
+    if (user) {
+      await updateTaskStatus(id, status);
+    }
+  }
+
   return {
     user,
     loading,
@@ -137,5 +152,6 @@ export function useWorkspaceSync() {
     toggleRoutine,
     approveAction,
     checkInHabit,
+    setTaskStatus,
   };
 }

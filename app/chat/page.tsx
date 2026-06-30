@@ -23,7 +23,7 @@ import {useEffect, useRef, useState, useCallback} from 'react';
 import type {OrchestrationResult} from '@/lib/orchestration/schemas';
 import {firebaseAuth, firestoreDb} from '@/lib/firebase/client';
 import {saveGeneratedPlan} from '@/lib/firebase/workspace';
-import {collection, query, where, getDocs} from 'firebase/firestore';
+import {collection, query, where, getDocs, doc, updateDoc} from 'firebase/firestore';
 
 type Message = {
   id: string;
@@ -364,15 +364,21 @@ export default function ChatPage() {
       );
       const snap = await getDocs(q);
       const list: Message[] = [];
+      const approvedTexts: string[] = [];
       snap.forEach((doc) => {
         const data = doc.data();
+        const textVal = data.content || '';
         list.push({
           id: doc.id,
           role: data.role === 'assistant' ? 'ling' : 'user',
-          text: data.content || '',
+          text: textVal,
           orchestration: data.structuredOutput || undefined,
         });
+        if (data.role === 'assistant' && data.approved === true) {
+          approvedTexts.push(textVal);
+        }
       });
+      setSavedMessageIds(approvedTexts);
       
       list.sort((a, b) => {
         const docA = snap.docs.find(d => d.id === a.id)?.data();
@@ -465,24 +471,12 @@ export default function ChatPage() {
               : 'Chat history was not saved.';
         }
       }
-      const containsSecurityTask = result.assistantMessage.toLowerCase().includes('google account activity') ||
-                                   result.tasks.some(t => t.title.toLowerCase().includes('google account activity')) ||
-                                   trimmed.toLowerCase().includes('google account activity') ||
-                                   trimmed.toLowerCase().includes('next task');
-
       const messageCards: Array<{title: string; detail: string; type: string}> = [];
       if (persistenceWarning) {
         messageCards.push({
           title: 'Not saved',
           detail: persistenceWarning,
           type: 'warning',
-        });
-      }
-      if (containsSecurityTask) {
-        messageCards.push({
-          title: 'Google Security Activity Audit',
-          detail: 'Verified Secure',
-          type: 'security_logs',
         });
       }
 
@@ -526,6 +520,20 @@ export default function ChatPage() {
 
     try {
       await saveGeneratedPlan(user.uid, result);
+      
+      const q = query(
+        collection(firestoreDb, 'messages'),
+        where('userId', '==', user.uid),
+        where('conversationId', '==', conversationId),
+        where('content', '==', result.assistantMessage)
+      );
+      const snap = await getDocs(q);
+      const updates: Promise<void>[] = [];
+      snap.forEach((d) => {
+        updates.push(updateDoc(doc(firestoreDb, 'messages', d.id), {approved: true}));
+      });
+      await Promise.all(updates);
+
       setSavedMessageIds((current) => [...current, result.assistantMessage]);
     } catch (error) {
       setSaveError(error instanceof Error ? error.message : 'Unable to save tasks.');

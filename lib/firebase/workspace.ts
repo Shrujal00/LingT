@@ -33,6 +33,7 @@ import {
   type OpenLoopStatus,
   type Routine,
   type Task,
+  type TaskStatus,
 } from '@/lib/lingt-data';
 
 export interface UserWorkspace {
@@ -207,6 +208,13 @@ export async function updateHabitCheckIn(id: string, completed: boolean, current
     streak: completed ? currentStreak + 1 : 0,
     status: completed ? 'active' : 'missed',
     lastCheckInAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  });
+}
+
+export async function updateTaskStatus(id: string, status: TaskStatus) {
+  await updateDoc(doc(firestoreDb, collectionNames.tasks, id), {
+    status,
     updatedAt: serverTimestamp(),
   });
 }

@@ -17,6 +17,8 @@
   <img src="https://img.shields.io/badge/LangGraph_State-1C3C3A?style=for-the-badge&logo=chainlink&logoColor=white" alt="LangGraph" />
 </p>
 
+**🚀 Live Demo:** [https://lingt-34974037445.asia-south1.run.app](https://lingt-34974037445.asia-south1.run.app)
+
 Welcome to **LingT**, a production-grade AI productivity workspace built entirely on the **Google Cloud, Firebase, and Gemini Developer Ecosystem**. LingT shifts the paradigm from passive, easily-ignored alerts to **active, autonomous agentic execution** by using Google's state-of-the-art AI, database, and API platforms to handle the friction of planning, drafting, and scheduling.
 
 ---

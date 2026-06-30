@@ -40,6 +40,7 @@ import type {
   Routine,
   MeetingActionItem,
   OpenLoopStatus,
+  TaskStatus,
 } from '@/lib/lingt-data';
 import {statusLabel} from '@/lib/lingt-data';
 import {firebaseApp, getFirebaseVapidKey} from '@/lib/firebase/client';
@@ -66,6 +67,7 @@ interface ProductivitySuiteProps {
   toggleRoutine: (id: string) => Promise<void>;
   approveAction: (id: string) => Promise<void>;
   checkInHabit: (id: string, done: boolean) => Promise<void>;
+  setTaskStatus: (id: string, status: TaskStatus) => Promise<void>;
   loading: boolean;
 }
 
@@ -80,6 +82,58 @@ function toWorkspaceTask(task: Task): WorkspaceTaskInput {
   };
 }
 
+function formatBlockTime(startStr: string, endStr: string): string {
+  try {
+    const startDate = new Date(startStr);
+    const endDate = new Date(endStr);
+    
+    if (isNaN(startDate.getTime()) || isNaN(endDate.getTime())) {
+      return `${startStr} to ${endStr}`;
+    }
+
+    const dateOptions: Intl.DateTimeFormatOptions = {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric'
+    };
+
+    const timeOptions: Intl.DateTimeFormatOptions = {
+      hour: 'numeric',
+      minute: '2-digit',
+      hour12: true
+    };
+
+    const dateFormatted = startDate.toLocaleDateString('en-US', dateOptions);
+    const startTimeFormatted = startDate.toLocaleTimeString('en-US', timeOptions);
+    const endTimeFormatted = endDate.toLocaleTimeString('en-US', timeOptions);
+
+    return `${dateFormatted} · ${startTimeFormatted} - ${endTimeFormatted}`;
+  } catch {
+    return `${startStr} to ${endStr}`;
+  }
+}
+
+function checkTaskOverdue(dueStr: string, status: string): boolean {
+  if (status === 'done' || status === 'snoozed') return false;
+  try {
+    const dueDate = new Date(dueStr);
+    if (isNaN(dueDate.getTime())) {
+      const parts = dueStr.split('-');
+      if (parts.length === 3) {
+        const year = parseInt(parts[0], 10);
+        const month = parseInt(parts[1], 10) - 1;
+        const day = parseInt(parts[2], 10);
+        const endOfDay = new Date(year, month, day, 23, 59, 59);
+        return new Date() > endOfDay;
+      }
+      return false;
+    }
+    return new Date() > dueDate;
+  } catch {
+    return false;
+  }
+}
+
 export default function ProductivitySuite({
   user,
   tasks,
@@ -91,10 +145,11 @@ export default function ProductivitySuite({
   toggleRoutine,
   approveAction,
   checkInHabit,
+  setTaskStatus,
   loading,
 }: ProductivitySuiteProps) {
   // Navigation State
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'tasks' | 'studio' | 'habits'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'tasks' | 'studio' | 'habits'>('tasks');
 
   // Cockpit & Capture States
   const [quickCapture, setQuickCapture] = useState('');
@@ -675,7 +730,7 @@ export default function ProductivitySuite({
                   >
                     <div className="text-xs font-medium uppercase tracking-wider text-muted-foreground">{stat.label}</div>
                     <div className="mt-2 text-2xl font-bold truncate text-foreground">{stat.value}</div>
-                    <div className="mt-1 text-xs text-muted-foreground truncate">{stat.detail}</div>
+                    <div className="mt-1 text-xs text-muted-foreground leading-normal">{stat.detail}</div>
                   </div>
                 );
               })}
@@ -796,7 +851,10 @@ export default function ProductivitySuite({
                       {calendar.proposedBlocks.map((block) => (
                         <div key={`${block.title}-${block.start}`} className="rounded-lg border border-border bg-background p-4 space-y-2">
                           <div className="font-semibold text-sm">{block.title}</div>
-                          <div className="text-xs text-muted-foreground leading-5">{block.start} to {block.end}. {block.reason}</div>
+                          <div className="text-xs text-muted-foreground leading-5 font-semibold text-brand-deep">
+                            {formatBlockTime(block.start, block.end)}
+                          </div>
+                          <div className="text-xs text-muted-foreground leading-relaxed">{block.reason}</div>
                           <div className="rounded-lg bg-brand-soft/40 px-3 py-1.5 text-xs text-brand-deep border border-brand/10">
                             <strong>Note:</strong> Double approval required before writing to Calendar.
                           </div>
@@ -949,35 +1007,92 @@ export default function ProductivitySuite({
               )}
 
               <div className="grid gap-3">
-                {tasks.map((task, i) => {
-                  const delays = ['delay-75', 'delay-150', 'delay-225', 'delay-300'];
-                  const priorityStyles = {
-                    do_now: 'bg-red-50 text-red-600 border-red-200',
-                    at_risk: 'bg-orange-50 text-orange-600 border-orange-200',
-                    schedule_today: 'bg-blue-50 text-blue-600 border-blue-200',
-                    can_wait: 'bg-zinc-50 text-zinc-600 border-zinc-200',
-                  };
-                  return (
-                    <div
-                      key={task.id}
-                      className={`rounded-xl border border-border bg-background p-4 transition-all duration-300 hover:border-brand/30 hover:scale-[1.01] hover:shadow-sm ${delays[i] || ''}`}
-                    >
-                      <div className="flex items-start justify-between gap-3">
-                        <div>
-                          <h4 className="font-semibold text-sm text-foreground">{task.title}</h4>
-                          <p className="mt-1 text-xs text-muted-foreground leading-5">{task.reason}</p>
+                {[...tasks]
+                  .sort((a, b) => {
+                    const weights = { do_now: 4, at_risk: 3, schedule_today: 2, can_wait: 1 };
+                    const weightA = weights[a.priority as keyof typeof weights] || 0;
+                    const weightB = weights[b.priority as keyof typeof weights] || 0;
+                    return weightB - weightA;
+                  })
+                  .map((task, i) => {
+                    const delays = ['delay-75', 'delay-150', 'delay-225', 'delay-300'];
+                    const priorityStyles = {
+                      do_now: 'bg-red-50 text-red-600 border-red-200',
+                      at_risk: 'bg-orange-50 text-orange-600 border-orange-200',
+                      schedule_today: 'bg-blue-50 text-blue-600 border-blue-200',
+                      can_wait: 'bg-zinc-50 text-zinc-600 border-zinc-200',
+                    };
+                    const isUrgent = task.priority === 'do_now' || task.priority === 'at_risk';                     const isOverdue = checkTaskOverdue(task.due, task.status);
+                    return (
+                      <div
+                        key={task.id}
+                        className={`rounded-xl border transition-all duration-300 hover:scale-[1.01] hover:shadow-sm p-4 relative overflow-hidden ${
+                          task.status === 'done'
+                            ? 'border-border bg-surface-muted/40 opacity-75'
+                            : task.priority === 'do_now'
+                            ? 'border-red-200 bg-red-50/15 hover:border-red-300 border-l-4 border-l-red-500'
+                            : task.priority === 'at_risk'
+                            ? 'border-orange-200 bg-orange-50/15 hover:border-orange-300 border-l-4 border-l-orange-500'
+                            : 'border-border bg-background hover:border-brand/30'
+                        } ${delays[i] || ''}`}
+                      >
+                        <div className="flex items-start gap-3">
+                          <button
+                            type="button"
+                            disabled={!user}
+                            onClick={() => {
+                              const nextStatus = task.status === 'done' ? 'open' : 'done';
+                              setTaskStatus(task.id, nextStatus);
+                            }}
+                            className={`mt-0.5 flex h-4.5 w-4.5 shrink-0 items-center justify-center rounded-full border transition hover:bg-brand/10 ${
+                              task.status === 'done'
+                                ? 'border-brand bg-brand text-white'
+                                : isOverdue
+                                ? 'border-red-400 bg-red-50 text-red-500 hover:border-red-500'
+                                : 'border-muted-foreground/30 bg-background hover:border-brand'
+                            }`}
+                          >
+                            {task.status === 'done' && (
+                              <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="3">
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                              </svg>
+                            )}
+                          </button>
+
+                          <div className="flex-1 min-w-0">
+                            <h4 className={`font-semibold text-sm transition-all leading-snug ${
+                              task.status === 'done'
+                                ? 'text-muted-foreground line-through opacity-60'
+                                : 'text-foreground'
+                            }`}>
+                              {task.title}
+                            </h4>
+                            <p className={`mt-1 text-xs transition-all leading-relaxed ${
+                              task.status === 'done'
+                                ? 'text-muted-foreground/60 line-through opacity-60'
+                                : 'text-muted-foreground'
+                            }`}>
+                              {task.reason}
+                            </p>
+                          </div>
+
+                          <span className={`rounded-full border px-2.5 py-0.5 text-[10px] font-semibold uppercase shrink-0 ${
+                            task.status === 'done'
+                              ? 'bg-zinc-100 text-zinc-400 border-zinc-200'
+                              : priorityStyles[task.priority] || ''
+                          }`}>
+                            {task.status === 'done' ? 'done' : task.priority.replace('_', ' ')}
+                          </span>
                         </div>
-                        <span className={`rounded-full border px-2.5 py-0.5 text-[10px] font-semibold uppercase ${priorityStyles[task.priority] || ''}`}>
-                          {task.priority.replace('_', ' ')}
-                        </span>
+                        <div className="mt-3.5 flex items-center justify-between text-xs text-muted-foreground border-t border-border/40 pt-2.5">
+                          <span>Due: {task.due}</span>
+                          <span className={`font-medium ${isOverdue ? 'text-red-600 font-bold' : 'text-foreground'}`}>
+                            {isOverdue ? '🔴 Overdue' : statusLabel(task.status)}
+                          </span>
+                        </div>
                       </div>
-                      <div className="mt-3.5 flex items-center justify-between text-xs text-muted-foreground border-t border-border/40 pt-2.5">
-                        <span>Due: {task.due}</span>
-                        <span className="font-medium text-foreground">{statusLabel(task.status)}</span>
-                      </div>
-                    </div>
-                  );
-                })}
+                    );
+                  })}
               </div>
             </div>
 
